@@ -1,8 +1,11 @@
 {
   "_readme": [
     "Curated overrides for the role tags inferred by scripts/build-card-db.mjs.",
-    "Effect-text heuristics are imperfect; corrections belong here rather than in the generator.",
-    "Shape: \"<cardId>\": { \"add\": [\"tag\", ...], \"remove\": [\"tag\", ...] }",
-    "Curation wins over inference. Keys that are not numeric card IDs are ignored."
+    "Effect-text heuristics are imperfect; corrections belong here, not in the generator.",
+    "Shape: \"<normalised card name>\": { \"add\": [\"tag\", ...], \"remove\": [\"tag\", ...] }",
+    "Names are normalised the same way as src/lib/normalize.ts (lowercase, no",
+    "apostrophes or accents), so the key for Boss's Orders is \"bosss orders\".",
+    "Keyed on name rather than an id so curation survives a card-data refresh.",
+    "Curation wins over inference. Keys that match no card are ignored."
   ]
 }

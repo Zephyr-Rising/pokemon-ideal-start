@@ -54,6 +54,17 @@ export function ResultsPanel({ analysis }: { analysis: Analysis }) {
         </p>
       </div>
 
+      {analysis.perAlternative.length > 1 && (
+        <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+          <h3 className="text-sm font-semibold">Each route on its own</h3>
+          <p className="mt-0.5 mb-3 text-xs text-slate-500">
+            Any one route is enough, so the headline is at least as high as the best of these —
+            and lower than their sum, because hands often satisfy more than one.
+          </p>
+          <Bars rows={analysis.perAlternative} tone="bg-emerald-500" />
+        </div>
+      )}
+
       {analysis.perRequirement.length > 0 && (
         <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <h3 className="text-sm font-semibold">Each requirement on its own</h3>
@@ -61,28 +72,40 @@ export function ResultsPanel({ analysis }: { analysis: Analysis }) {
             How often each row is met individually. The headline above needs all of them at once,
             so it is lower than any single row.
           </p>
-          <ul className="space-y-2">
-            {analysis.perRequirement.map((row) => (
-              <li key={row.id} className="space-y-1">
-                <div className="flex items-baseline justify-between gap-2 text-sm">
-                  <span className="truncate">{row.label}</span>
-                  <span className="tnum shrink-0 font-medium">{pct(row.probability)}</span>
-                </div>
-                <div
-                  className="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"
-                  role="presentation"
-                >
-                  <div
-                    className="h-full rounded-full bg-sky-500"
-                    style={{ width: `${(row.probability ?? 0) * 100}%` }}
-                  />
-                </div>
-              </li>
-            ))}
-          </ul>
+          <Bars rows={analysis.perRequirement} tone="bg-sky-500" />
         </div>
       )}
     </section>
+  )
+}
+
+function Bars({
+  rows,
+  tone,
+}: {
+  rows: { id: string; label: string; probability: number | null }[]
+  tone: string
+}) {
+  return (
+    <ul className="space-y-2">
+      {rows.map((row) => (
+        <li key={row.id} className="space-y-1">
+          <div className="flex items-baseline justify-between gap-2 text-sm">
+            <span className="truncate">{row.label}</span>
+            <span className="tnum shrink-0 font-medium">{pct(row.probability)}</span>
+          </div>
+          <div
+            className="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"
+            role="presentation"
+          >
+            <div
+              className={`h-full rounded-full ${tone}`}
+              style={{ width: `${(row.probability ?? 0) * 100}%` }}
+            />
+          </div>
+        </li>
+      ))}
+    </ul>
   )
 }
 

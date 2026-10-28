@@ -4,8 +4,8 @@ import { countOf, handDistribution, type Bucket, type HandDist } from './hyperge
 
 export type RequirementOp = 'atLeast' | 'atMost' | 'exactly'
 
-/** One row of the ideal-start condition. Rows are ANDed; cards within a row are
- *  a union, so `atLeast 1` over three search Items means "any one of them". */
+/** One row of a condition. Cards within a row count together, so `atLeast 1`
+ *  over three search Items means "any one of them". */
 export interface Requirement {
   id: string
   label: string
@@ -14,10 +14,29 @@ export interface Requirement {
   n: number
 }
 
-export interface RequirementOutcome {
+/**
+ * One route to an ideal start: every row in it must hold.
+ *
+ * Several alternatives express the ways a deck can get there — a hand with
+ * Cyrano is as good as one with the Meowth ex that fetches it, or the Ultra Ball
+ * that fetches the Meowth ex. Any one alternative holding is enough.
+ */
+export interface Alternative {
   id: string
   label: string
-  /** P(this row alone is satisfied | legal hand), on the 8-card look. */
+  requirements: Requirement[]
+}
+
+/** The whole ideal-start condition: alternatives are ORed, rows within one ANDed. */
+export type Condition = Alternative[]
+
+export const allRequirements = (condition: Condition): Requirement[] =>
+  condition.flatMap((alternative) => alternative.requirements)
+
+export interface Outcome {
+  id: string
+  label: string
+  /** P(satisfied on its own | legal hand), across the 8-card look. */
   probability: number | null
 }
 
@@ -28,13 +47,18 @@ export interface Analysis {
   mulliganRate: number
   /** Expected redraws before keeping a hand. */
   expectedMulligans: number
-  /** P(all rows met | legal kept hand) across the opening 7. */
+  /** P(condition met | legal kept hand) across the opening 7. */
   openingHand: number | null
-  /** P(all rows met | legal kept hand) across the 8-card first look. */
+  /** P(condition met | legal kept hand) across the 8-card first look. */
   firstLook: number | null
-  perRequirement: RequirementOutcome[]
+  /** Each row on its own. */
+  perRequirement: Outcome[]
+  /** Each alternative on its own — all of its rows, none of the others. */
+  perAlternative: Outcome[]
   /** Set when no probability is defined — an empty deck, or one with no Basics. */
   impossible: boolean
+  /** Set when the condition has too many rows to evaluate exactly. */
+  tooComplex: boolean
   /**
    * Self-check surface. `legalOpening` and `legalFirstLook` are the two DP runs'
    * independently-derived probabilities of keeping a legal hand; both must equal
@@ -48,6 +72,9 @@ export const HAND_SIZE = 7
 /** The opening 7 plus the turn-1 draw. Both players draw, so this is turn-order independent. */
 export const FIRST_LOOK_SIZE = 8
 export const PRIZE_COUNT = 6
+/** The DP enumerates every saturated count vector, so the state space must stay
+ *  bounded. Far above any hand-built condition; a guard, not a limit in practice. */
+const MAX_STATES = 2_000_000
 
 /** Caps: how high each predicate's count must be tracked to answer its question. */
 function capFor(req: Requirement): number {
@@ -56,17 +83,23 @@ function capFor(req: Requirement): number {
   return req.op === 'atLeast' ? req.n : req.n + 1
 }
 
+function satisfied(count: number, req: Requirement): boolean {
+  if (req.op === 'atLeast') return count >= req.n
+  if (req.op === 'atMost') return count <= req.n
+  return count === req.n
+}
+
 /**
- * Partition the deck into buckets of cards that are indistinguishable for this
- * condition. The implicit final predicate is "is a Basic Pokémon", which drives
- * mulligan legality.
+ * Partition the deck into buckets of cards indistinguishable for this condition.
+ * The implicit final predicate is "is a Basic Pokémon", which drives mulligan
+ * legality.
  */
-export function buildBuckets(cards: DeckCard[], requirements: Requirement[]): Bucket[] {
-  const basicBit = 1 << requirements.length
+export function buildBuckets(cards: DeckCard[], rows: Requirement[]): Bucket[] {
+  const basicBit = 1 << rows.length
   const keyToBits = new Map<string, number>()
 
-  requirements.forEach((req, index) => {
-    for (const key of req.cardKeys) {
+  rows.forEach((row, index) => {
+    for (const key of row.cardKeys) {
       keyToBits.set(key, (keyToBits.get(key) ?? 0) | (1 << index))
     }
   })
@@ -83,49 +116,53 @@ export function buildBuckets(cards: DeckCard[], requirements: Requirement[]): Bu
   return [...sizes].map(([mask, size]) => ({ mask, size }))
 }
 
-function requirementsMet(
-  dist: HandDist,
-  state: number,
-  requirements: Requirement[],
-): boolean {
-  for (let i = 0; i < requirements.length; i++) {
-    const req = requirements[i]
-    const count = countOf(dist, state, i)
-    if (req.op === 'atLeast' && count < req.n) return false
-    if (req.op === 'atMost' && count > req.n) return false
-    if (req.op === 'exactly' && count !== req.n) return false
-  }
-  return true
-}
+export function analyze(cards: DeckCard[], condition: Condition): Analysis {
+  const rows = allRequirements(condition)
+  const rowIndex = new Map(rows.map((row, i) => [row.id, i]))
 
-export function analyze(cards: DeckCard[], requirements: Requirement[]): Analysis {
   const deckSize = cards.reduce((sum, c) => sum + c.count, 0)
   const basicCount = cards
     .filter((c) => c.tags.includes('basic'))
     .reduce((sum, c) => sum + c.count, 0)
 
-  const empty: Analysis = {
+  const blank = (tooComplex: boolean): Analysis => ({
     deckSize,
     basicCount,
     mulliganRate: basicCount === 0 && deckSize > 0 ? 1 : 0,
     expectedMulligans: Infinity,
     openingHand: null,
     firstLook: null,
-    perRequirement: requirements.map((r) => ({ id: r.id, label: r.label, probability: null })),
+    perRequirement: rows.map((r) => ({ id: r.id, label: r.label, probability: null })),
+    perAlternative: condition.map((a) => ({ id: a.id, label: a.label, probability: null })),
     impossible: true,
+    tooComplex,
     diagnostics: { legalOpening: 0, legalFirstLook: 0, legalClosedForm: 0 },
-  }
-  if (deckSize < FIRST_LOOK_SIZE || basicCount === 0) return empty
+  })
 
-  const buckets = buildBuckets(cards, requirements)
-  const basicIndex = requirements.length
-  const reqCaps = requirements.map(capFor)
+  if (deckSize < FIRST_LOOK_SIZE || basicCount === 0) return blank(false)
+
+  const reqCaps = rows.map(capFor)
+  const stateCount = reqCaps.reduce((n, cap) => n * (cap + 1), 3)
+  if (stateCount > MAX_STATES) return blank(true)
+
+  const buckets = buildBuckets(cards, rows)
+  const basicIndex = rows.length
 
   // P(legal hand) has a closed form; computing it directly gives the two DP runs
   // an independent check (asserted in tests) rather than trusting them blindly.
   const legal = 1 - binom(deckSize - basicCount, HAND_SIZE) / binom(deckSize, HAND_SIZE)
 
-  // --- Opening 7: Basic count only needs 0 vs >=1.
+  /** Any one alternative holding is enough — this is where OR lives, and the DP
+   *  does not care: it evaluates whatever predicate it is handed per state. */
+  const conditionMet = (dist: HandDist, state: number): boolean =>
+    condition.length === 0 ||
+    condition.some((alternative) =>
+      alternative.requirements.every((row) =>
+        satisfied(countOf(dist, state, rowIndex.get(row.id)!), row),
+      ),
+    )
+
+  // --- Opening 7: the Basic count only needs 0 vs >=1.
   const dist7 = handDistribution(buckets, [...reqCaps, 1], HAND_SIZE, deckSize)
   let legal7 = 0
   let met7 = 0
@@ -133,7 +170,7 @@ export function analyze(cards: DeckCard[], requirements: Requirement[]): Analysi
     const p = dist7.probs[state]
     if (p === 0 || countOf(dist7, state, basicIndex) < 1) continue
     legal7 += p
-    if (requirementsMet(dist7, state, requirements)) met7 += p
+    if (conditionMet(dist7, state)) met7 += p
   }
 
   // --- First look of 8. Drawing 7 then 1 is equivalent to drawing an 8-card set
@@ -145,7 +182,8 @@ export function analyze(cards: DeckCard[], requirements: Requirement[]): Analysi
   const weights = [0, HAND_SIZE / FIRST_LOOK_SIZE, 1]
   let legal8 = 0
   let met8 = 0
-  const perRequirementMet = new Array<number>(requirements.length).fill(0)
+  const rowMet = new Array<number>(rows.length).fill(0)
+  const altMet = new Array<number>(condition.length).fill(0)
 
   for (let state = 0; state < dist8.stateCount; state++) {
     const p = dist8.probs[state]
@@ -156,23 +194,24 @@ export function analyze(cards: DeckCard[], requirements: Requirement[]): Analysi
     const weighted = p * weight
     legal8 += weighted
 
-    // One pass serves both the combined condition and each row on its own:
-    // every row is checked here, and `allMet` is their conjunction.
-    let allMet = true
-    for (let i = 0; i < requirements.length; i++) {
-      const req = requirements[i]
-      const count = countOf(dist8, state, i)
-      const ok =
-        req.op === 'atLeast'
-          ? count >= req.n
-          : req.op === 'atMost'
-            ? count <= req.n
-            : count === req.n
-      if (ok) perRequirementMet[i] += weighted
-      else allMet = false
-    }
-    if (allMet) met8 += weighted
+    // One pass serves the whole condition, each alternative, and each row.
+    const rowOk = rows.map((row, i) => satisfied(countOf(dist8, state, i), row))
+    rows.forEach((_, i) => {
+      if (rowOk[i]) rowMet[i] += weighted
+    })
+
+    let any = condition.length === 0
+    condition.forEach((alternative, a) => {
+      const ok = alternative.requirements.every((row) => rowOk[rowIndex.get(row.id)!])
+      if (ok) {
+        altMet[a] += weighted
+        any = true
+      }
+    })
+    if (any) met8 += weighted
   }
+
+  const share = (value: number) => (legal8 > 0 ? value / legal8 : null)
 
   return {
     deckSize,
@@ -180,13 +219,19 @@ export function analyze(cards: DeckCard[], requirements: Requirement[]): Analysi
     mulliganRate: 1 - legal,
     expectedMulligans: legal > 0 ? (1 - legal) / legal : Infinity,
     openingHand: legal7 > 0 ? met7 / legal7 : null,
-    firstLook: legal8 > 0 ? met8 / legal8 : null,
-    perRequirement: requirements.map((req, i) => ({
-      id: req.id,
-      label: req.label,
-      probability: legal8 > 0 ? perRequirementMet[i] / legal8 : null,
+    firstLook: share(met8),
+    perRequirement: rows.map((row, i) => ({
+      id: row.id,
+      label: row.label,
+      probability: share(rowMet[i]),
+    })),
+    perAlternative: condition.map((alternative, a) => ({
+      id: alternative.id,
+      label: alternative.label,
+      probability: share(altMet[a]),
     })),
     impossible: false,
+    tooComplex: false,
     diagnostics: { legalOpening: legal7, legalFirstLook: legal8, legalClosedForm: legal },
   }
 }

@@ -6,7 +6,7 @@
  * literal shuffle-draw-mulligan procedure. They live under tests/ so the Monte
  * Carlo path cannot reach the shipped bundle — the app's numbers are always exact.
  */
-import type { Requirement } from '../src/lib/prob/analyze'
+import type { Condition, Requirement } from '../src/lib/prob/analyze'
 import type { DeckCard } from '../src/lib/types'
 
 /** One bitmask per *physical* card — expanded per copy, not bucketed. */
@@ -216,4 +216,46 @@ export function simulatePrized(
   }
 
   return hits / trials
+}
+
+/**
+ * Exhaustive enumeration for a full condition: alternatives are ORed and the
+ * rows inside one are ANDed. Masks must come from expandMasks() over
+ * allRequirements(condition), so row i is bit i.
+ */
+export function bruteForceConditionFirstLook(
+  masks: number[],
+  condition: Condition,
+  rows: Requirement[],
+  handSize: number,
+): number | null {
+  const indexOf = new Map(rows.map((row, i) => [row.id, i]))
+  const holds = (counts: number[], row: Requirement): boolean => {
+    const c = counts[indexOf.get(row.id)!]
+    if (row.op === 'atLeast') return c >= row.n
+    if (row.op === 'atMost') return c <= row.n
+    return c === row.n
+  }
+
+  let legal = 0
+  let good = 0
+  for (const combo of combinations(masks.length, handSize)) {
+    const inHand = new Set(combo)
+    const { counts, basics } = countsOf(
+      combo.map((i) => masks[i]),
+      rows.length,
+    )
+    if (basics === 0) continue
+
+    for (let drawn = 0; drawn < masks.length; drawn++) {
+      if (inHand.has(drawn)) continue
+      legal++
+      const withDraw = counts.slice()
+      for (let i = 0; i < rows.length; i++) {
+        if (masks[drawn] & (1 << i)) withDraw[i]++
+      }
+      if (condition.some((alt) => alt.requirements.every((row) => holds(withDraw, row)))) good++
+    }
+  }
+  return legal === 0 ? null : good / legal
 }

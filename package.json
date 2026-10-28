@@ -17,6 +17,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "build:cards": "node scripts/build-card-db.mjs",
+    "fetch:cards": "node scripts/fetch-tcgdex.mjs",
     "e2e": "playwright test",
     "preflight": "node scripts/preflight.mjs"
   },

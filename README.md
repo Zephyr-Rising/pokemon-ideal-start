@@ -11,11 +11,20 @@ Everything is computed in the browser, exactly. No backend, no simulation, no sa
 - **Ideal-start probability** across your first 8 cards — the opening 7 plus your turn-1 draw.
   Both players draw on their first turn, so this figure is the same going first or second.
 - **Opening 7 on its own**, and your **mulligan rate**.
-- **Each requirement in isolation**, so you can see which one is actually failing.
+- **Each requirement and each route in isolation**, so you can see what is actually failing.
+- **A real example hand** — one that hits your condition, or one that misses it, drawn at random
+  from the hands that actually do so, with the card images and a breakdown of what it is missing.
 - **What each copy is worth**: the change in the headline figure from running one more or one fewer
-  copy of every card, ranked by impact.
+  copy of every card, ranked by impact. Adjust counts in place with the ± controls on the deck list.
 - **Prize-zone risk**: the chance every copy of a card is among the six prizes, where nothing can
   search it out.
+
+### Routes (OR)
+
+A condition is a set of **routes**. Within a route every row must hold; **any one route is enough**.
+That matters because decks reach the same start by different paths — a hand with Cyrano is as good
+as one holding the Meowth ex that fetches it, or the Ultra Ball that fetches the Meowth ex. Put
+interchangeable cards in one row, and genuinely different plans in separate routes.
 
 Probabilities are **conditioned on a hand you keep**. Hands with no Basic Pokémon get reshuffled at
 the table, so they are excluded rather than counted as failures.
@@ -38,30 +47,57 @@ Correctness is pinned by three independent oracles in `tests/`, none sharing cod
 | Oracle | What it checks |
 | --- | --- |
 | Closed-form hypergeometric | Single-group cases, to 12 decimal places |
-| Exhaustive subset enumeration | Overlapping groups, `atMost` and `exactly`, to 12 decimal places |
+| Exhaustive subset enumeration | Overlapping groups and routes, `atMost` and `exactly`, to 12 dp |
 | Monte Carlo simulation | A real 60-card deck, simulating the literal shuffle-draw-mulligan loop |
+
+The example hand is drawn by rejection sampling over that same procedure, so it is a uniform sample
+from the distribution the headline describes — an example of the real thing, not an illustration.
+A test pins this: among sampled hands meeting "at least 1 X", the share also holding two must equal
+`P(>=2) / P(>=1)` from the exact maths.
 
 The DP also recomputes the legal-hand rate two different ways, both asserted against the closed form
 `1 − C(60−B,7)/C(60,7)`.
 
 ## Card data
 
-`src/data/cards.json` is generated from `data/EN_Card_Data.csv` by `scripts/build-card-db.mjs` and
-committed. Pre-flight regenerates it and fails if the committed copy doesn't match byte-for-byte, so
-the data asset is always reproducible from its source.
+Cards come from [TCGdex](https://tcgdex.dev), scoped to what is **currently Standard legal**, plus
+card images. The pipeline is two deliberate steps:
 
-Two details worth knowing:
+```
+npm run fetch:cards   # network: TCGdex -> data/tcgdex-cards.json  (committed)
+npm run build:cards   # offline:  that + the CSV -> src/data/cards.json
+```
 
-- The CSV holds **one row per attack/ability**, not per card — 2,022 rows collapse to 1,267 unique
-  cards. The generator groups by Card ID and collects moves into an array.
-- Cards outside this pool (newer sets than the data) **still count toward the deck** and toward every
-  probability. They just carry no metadata, and the UI says so. The one thing they cannot do is be
-  recognised as Basic Pokémon, which would understate the mulligan rate — hence the warning.
+Only `fetch:cards` touches the network, and it is never part of a build. Pre-flight regenerates
+`cards.json` and fails if the committed copy doesn't match byte-for-byte, so the shipped data is
+always reproducible from its sources. Responses are cached under `.cache/` (gitignored), so a
+re-run is near-instant; pass `--refresh` to bypass it.
+
+`data/EN_Card_Data.csv` is kept for the Kaggle simulator's Card IDs, which the next phase needs, and
+as a fallback for rules TCGdex does not model.
+
+Details worth knowing:
+
+- **Standard legality is decided per card, not per set.** Stellar Crown carries a mix of G- and
+  H-marked cards, so a set-level decision would be wrong. `data/standard-overrides.json` corrects
+  the API where its legality data lags.
+- **Identity ignores effect-text formatting.** TCGdex prints the same Trainer with no separator, a
+  newline, or a blank line between its sentences across reprints; keying on that split Ultra Ball
+  into three cards, which would have silently miscounted any deck running two printings.
+- **Two sets can share an abbreviation** (both 30th sets report `30C`), so a printing key may map to
+  several cards and the resolver picks the one whose name matches the decklist.
+- **A set/number never overrides a disagreeing name.** A number locates a printing; the name
+  identifies the card. Mismatches are reported, not silently applied.
+- **Cards outside the pool still count** toward the deck and toward every probability. They carry no
+  details, and the UI says whether a card is simply unknown or merely not Standard legal.
+- **Basic Energy has no artwork in any Standard-legal set** — all 32 printings 404 — so the fetch
+  step borrows the image from the most recent Scarlet & Violet printing of the same Energy. It is
+  the same card face, and showing the real card beats drawing a substitute.
 
 Role tags (`basic`, `attacker`, `poke-search`, `draw`, …) are derived offline by the generator from
 card kind plus effect text. Heuristics are imperfect, so `src/data/curated-tags.json` can add or
-remove tags per card and `src/data/curated-aliases.json` maps decklist name variants onto the right
-card. Curation always wins over inference.
+remove tags per card, keyed on the card's normalised name so curation survives a data refresh.
+Curation always wins over inference.
 
 ## Development
 
@@ -80,7 +116,8 @@ deploy mean the same thing.
 | `dev` | Vite dev server |
 | `build:pages` | Production build on the GitHub Pages subpath |
 | `preview:pages` | Serve that build on the same subpath |
-| `build:cards` | Regenerate the card database from the CSV |
+| `fetch:cards` | Refresh the TCGdex cache (the only networked script) |
+| `build:cards` | Regenerate the card database from the cached sources |
 | `test` / `test:watch` | Unit tests |
 | `e2e` | Browser smoke test against the production build |
 

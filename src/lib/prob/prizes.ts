@@ -77,7 +77,7 @@ export interface PrizeRiskRow {
  */
 export function prizeRiskRows(
   cards: { key: string; label: string; count: number; tags: string[] }[],
-  requirements: { id: string; label: string; cardKeys: string[] }[],
+  rows: { id: string; label: string; cardKeys: string[] }[],
 ): { cards: PrizeRiskRow[]; groups: PrizeRiskRow[] } {
   const deckSize = cards.reduce((sum, c) => sum + c.count, 0)
   const deckBasics = cards
@@ -97,7 +97,7 @@ export function prizeRiskRows(
 
   const byKey = new Map(cards.map((c) => [c.key, c]))
   const groupRows: PrizeRiskRow[] = []
-  for (const requirement of requirements) {
+  for (const requirement of rows) {
     const members = requirement.cardKeys
       .map((k) => byKey.get(k))
       .filter((c): c is (typeof cards)[number] => c !== undefined)

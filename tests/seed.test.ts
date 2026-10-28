@@ -27,14 +27,14 @@ const ALL_DECKS = [
 /** Display labels of the cards in a seeded row. */
 function rowCards(deckName: string, index = 0): string[] {
   const deck = load(deckName)
-  const row = seedCondition(deck.cards)[index]
+  const row = seedCondition(deck.cards)[0].requirements[index]
   return row.cardKeys.map((key) => deck.cards.find((c) => c.key === key)!.label)
 }
 
 describe('seedCondition', () => {
   it('builds sensible rows for the example deck', () => {
     const deck = load('mega-kangaskhan')
-    const rows = seedCondition(deck.cards)
+    const rows = seedCondition(deck.cards)[0].requirements
     const labels = rows.map((r) => r.label)
 
     expect(labels).toContain('Main starter')
@@ -69,8 +69,10 @@ describe('seedCondition', () => {
   it('never seeds a row whose group is empty', () => {
     for (const name of ALL_DECKS) {
       const deck = load(name)
-      for (const row of seedCondition(deck.cards)) {
-        expect(row.cardKeys.length).toBeGreaterThan(0)
+      for (const alternative of seedCondition(deck.cards)) {
+        for (const row of alternative.requirements) {
+          expect(row.cardKeys.length).toBeGreaterThan(0)
+        }
       }
     }
   })
@@ -119,12 +121,12 @@ describe('deck summary', () => {
 describe('end-to-end shape', () => {
   it('produces a ranked sensitivity table for the example deck', () => {
     const deck = load('mega-kangaskhan')
-    const requirements = seedCondition(deck.cards)
-    const rows = sensitivity(deck.cards, requirements)
+    const condition = seedCondition(deck.cards)
+    const rows = sensitivity(deck.cards, condition)
 
     expect(rows.length).toBeGreaterThan(0)
     // Every row must belong to a requirement group or be a Basic Pokémon.
-    const grouped = new Set(requirements.flatMap((r) => r.cardKeys))
+    const grouped = new Set(condition.flatMap((a) => a.requirements.flatMap((r) => r.cardKeys)))
     for (const row of rows) {
       const card = deck.cards.find((c) => c.key === row.key)!
       expect(grouped.has(row.key) || card.tags.includes('basic')).toBe(true)

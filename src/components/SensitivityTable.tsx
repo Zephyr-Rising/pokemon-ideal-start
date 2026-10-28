@@ -6,7 +6,7 @@ export function SensitivityTable({ rows }: { rows: SensitivityRow[] }) {
 
   return (
     <section className="space-y-3">
-      <h2 className="text-lg font-semibold">4 · What each copy is worth</h2>
+      <h2 className="text-lg font-semibold">5 · What each copy is worth</h2>
       <p className="text-xs text-slate-500">
         Change in the 8-card figure from running one more or one fewer copy, holding the deck at
         its current size by trading against a <strong>neutral card</strong> — one in no requirement

@@ -1,0 +1,15 @@
+{
+  "_readme": [
+    "Corrections to TCGdex's `legal.standard` flag, which can lag for newly released",
+    "or special sets. Curation wins over the API.",
+    "",
+    "includeSets: TCGdex-set ids whose cards are treated as Standard legal regardless",
+    "of what the API reports. excludeSets: the reverse.",
+    "",
+    "30th / 30th-c (30th Celebration, 30th Classic Collection) are reported as",
+    "standard:false by TCGdex but are Standard legal in play - confirmed by the user,",
+    "2026-10-28. Without this, cards such as `Mew ex 30C 66` are dropped."
+  ],
+  "includeSets": ["30th", "30th-c"],
+  "excludeSets": []
+}

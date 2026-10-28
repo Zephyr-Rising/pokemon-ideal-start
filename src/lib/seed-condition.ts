@@ -1,6 +1,6 @@
 import { hasTag } from './deck-tags'
 import { norm } from './normalize'
-import type { Requirement } from './prob/analyze'
+import type { Condition } from './prob/analyze'
 import type { DeckCard } from './types'
 
 const SEARCH_TAGS = ['poke-search', 'energy-search', 'search-to-hand']
@@ -46,7 +46,7 @@ function mainStarters(cards: DeckCard[]): string[] {
  * that is true by definition (it IS the mulligan rule), so it would always read
  * 100% and teach nothing.
  */
-export function seedCondition(cards: DeckCard[]): Requirement[] {
+export function seedCondition(cards: DeckCard[]): Condition {
   const keysOf = (predicate: (card: DeckCard) => boolean): string[] =>
     cards.filter(predicate).map((c) => c.key)
 
@@ -64,7 +64,7 @@ export function seedCondition(cards: DeckCard[]): Requirement[] {
     { label: 'Energy', cardKeys: energy },
   ]
 
-  return candidates
+  const rows = candidates
     .filter((c) => c.cardKeys.length > 0)
     .map((c, index) => ({
       id: `seed-${index}`,
@@ -73,4 +73,8 @@ export function seedCondition(cards: DeckCard[]): Requirement[] {
       op: 'atLeast' as const,
       n: 1,
     }))
+
+  // A single alternative: one route, every row required. Add more in the UI to
+  // describe other ways the deck reaches the same start.
+  return rows.length > 0 ? [{ id: 'seed-a', label: 'Main route', requirements: rows }] : []
 }

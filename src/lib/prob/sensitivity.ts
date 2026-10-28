@@ -1,5 +1,5 @@
 import type { DeckCard } from '../types'
-import { analyze, type Requirement } from './analyze'
+import { allRequirements, analyze, type Condition } from './analyze'
 
 export interface SensitivityRow {
   key: string
@@ -56,14 +56,11 @@ function withCount(cards: DeckCard[], key: string, delta: number): DeckCard[] {
  * Changing a count also moves the Basic count and therefore the mulligan rate;
  * that is captured automatically, because Basic is one of the tracked predicates.
  */
-export function sensitivity(
-  cards: DeckCard[],
-  requirements: Requirement[],
-): SensitivityRow[] {
-  const baseline = analyze(cards, requirements)
+export function sensitivity(cards: DeckCard[], condition: Condition): SensitivityRow[] {
+  const baseline = analyze(cards, condition)
   if (baseline.firstLook === null) return []
 
-  const grouped = new Set(requirements.flatMap((r) => r.cardKeys))
+  const grouped = new Set(allRequirements(condition).flatMap((r) => r.cardKeys))
   // Real cards that contribute to nothing — the source of an added copy.
   const neutralDonor = cards.find(
     (c) => !grouped.has(c.key) && !c.tags.includes('basic') && c.count > 0,
@@ -79,7 +76,7 @@ export function sensitivity(
 
     // Cut one copy, backfilling the slot with a neutral card.
     const cutDeck = [...withCount(cards, card.key, -1), neutralCard(1)]
-    const cut = analyze(cutDeck, requirements)
+    const cut = analyze(cutDeck, condition)
     const minusOne = cut.firstLook === null ? null : cut.firstLook - baseline.firstLook
 
     // Add one copy, taking the slot from a neutral card.
@@ -97,7 +94,7 @@ export function sensitivity(
         neutralDonor.key,
         -1,
       )
-      const added = analyze(addDeck, requirements)
+      const added = analyze(addDeck, condition)
       plusOne = added.firstLook === null ? null : added.firstLook - baseline.firstLook
     }
 

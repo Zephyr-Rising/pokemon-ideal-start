@@ -74,24 +74,28 @@ describe('resolveDeck', () => {
     expect(basics).toBe(21)
   })
 
-  // Eight real decklists. `unresolved` records cards genuinely outside this
-  // card pool (newer sets such as CRI and 30C); they must still count toward 60.
+  // Eight real decklists. Since the card data comes from TCGdex's Standard pool,
+  // every card in every deck resolves by its exact printing.
   it.each([
-    ['mega-kangaskhan', 0],
-    ['festival-lead', 0],
-    ['dragapult-blaziken', 0],
-    ['slowking', 0],
-    ['dragapult-munkidori', 0],
-    ['slowking-metagross', 1], // Mew ex 30C 66
-    ['ns-zoroark', 1], //         Special Red Card CRI 82
-    ['alakazam', 1], //           Special Red Card CRI 82
-  ])('resolves %s to a parseable 60 with %i unresolved', (name, unresolved) => {
+    'mega-kangaskhan',
+    'festival-lead',
+    'dragapult-blaziken',
+    'slowking',
+    'dragapult-munkidori',
+    'slowking-metagross',
+    'ns-zoroark',
+    'alakazam',
+  ])('resolves every card in %s', (name) => {
     const deck = resolveDeck(fixture(name))
     expect(deck.totalCards).toBe(60)
     expect(deck.badLines).toEqual([])
-    expect(deck.unresolvedCards).toBe(unresolved)
+    expect(deck.unresolvedCards).toBe(0)
     // A set/number that names a different card is never accepted silently.
     expect(deck.conflicts).toEqual([])
+    // Only the basic-Energy colour map may fall back; nothing guesses by name.
+    for (const entry of deck.entries) {
+      expect(['exact', 'basic-energy']).toContain(entry.method)
+    }
   })
 
   it('parses a set code that starts with a digit', () => {
@@ -101,60 +105,71 @@ describe('resolveDeck', () => {
     expect(lines[0]).toMatchObject({ count: 1, name: 'Mew ex', set: '30C', num: '66' })
   })
 
-  it('does not accept a printing whose name disagrees', () => {
-    // POR 88 is 'Rock Fighting Energy' in the card data. Matching on number
-    // alone would silently substitute an unrelated card.
-    const deck = resolveDeck('1 Rock Fighting Energy POR 88')
+  it('resolves a card an older data source had wrong', () => {
+    // Two real decklists carry `Telepathic Psychic Energy POR 88`. An earlier
+    // CSV listed POR 88 as a different card under a different name; TCGdex has
+    // the real one, so this now matches exactly with no alias needed.
+    const deck = resolveDeck('4 Telepathic Psychic Energy POR 88')
     expect(deck.entries[0].method).toBe('exact')
+    expect(deck.cards[0].resolvedName).toBe('Telepathic Psychic Energy')
+    expect(deck.cards[0].tags).toContain('special-energy')
+    expect(deck.conflicts).toEqual([])
+  })
 
+  it('does not accept a printing whose name disagrees', () => {
+    // Matching on number alone would silently substitute an unrelated card.
     const mismatch = resolveDeck('1 Some Nonexistent Card POR 88')
     expect(mismatch.entries[0].method).toBe('printing-conflict')
     expect(mismatch.conflicts).toHaveLength(1)
   })
 
-  it('resolves a curated name alias', () => {
-    // Two real decklists carry this spelling; the data holds it as
-    // 'Telepath Psychic Energy POR 87'.
-    const deck = resolveDeck('4 Telepathic Psychic Energy POR 88')
-    expect(deck.entries[0].method).toBe('alias')
-    expect(deck.cards[0].resolvedName).toBe('Telepath Psychic Energy')
-    expect(deck.cards[0].tags).toContain('energy')
-    expect(deck.conflicts).toEqual([])
+  it('reports a real card that is not Standard legal', () => {
+    // Far more useful than calling a card nobody mistyped "unknown".
+    const deck = resolveDeck('1 Iron Hands ex PAR 70')
+    expect(deck.entries[0].method).toBe('not-standard')
+    expect(deck.nonStandard).toEqual(['Iron Hands ex'])
+    expect(deck.totalCards).toBe(1) // still counted
   })
 
   it('maps basic Energy printed under an absent set via the colour map', () => {
     const deck = resolveDeck('6 Grass Energy MEE 9')
     const [card] = deck.cards
     expect(card.count).toBe(6)
-    expect(card.resolvedName).toBe('Basic {G} Energy')
+    expect(card.resolvedName).toBe('Grass Energy')
     expect(deck.entries[0].method).toBe('basic-energy')
     // Display keeps what the player wrote.
     expect(card.label).toBe('Grass Energy')
   })
 
   it('does not mistake a special Energy for a basic one', () => {
-    // 'Grow Grass Energy' contains 'Grass Energy' but is a different card, and
-    // its exact printing must win.
-    const deck = resolveDeck('1 Grow Grass Energy POR 86')
+    // 'Growing Grass Energy' contains 'Grass Energy' but is a different card,
+    // and its exact printing must win over the colour map.
+    const deck = resolveDeck('1 Growing Grass Energy POR 86')
     expect(deck.entries[0].method).toBe('exact')
-    expect(deck.cards[0].resolvedName).toBe('Grow Grass Energy')
+    expect(deck.cards[0].resolvedName).toBe('Growing Grass Energy')
     expect(deck.cards[0].tags).toContain('special-energy')
   })
 
   it('merges reprints of the same card into one DeckCard', () => {
-    const deck = resolveDeck('4 Ultra Ball MEG 131\n1 Ultra Ball SVI 196')
+    // Ultra Ball is printed in several sets with trivially different effect-text
+    // formatting. If those counted as different cards, a deck running two
+    // printings would split its copies and every Ultra Ball probability would
+    // be wrong.
+    const deck = resolveDeck('4 Ultra Ball MEG 131\n1 Ultra Ball ASC 213')
     expect(deck.cards).toHaveLength(1)
     expect(deck.cards[0].count).toBe(5)
-    expect(deck.cards[0].printings).toEqual(['MEG 131', 'SVI 196'])
+    expect(deck.cards[0].printings).toEqual(['MEG 131', 'ASC 213'])
   })
 
   it('falls back to another printing by name, with a warning', () => {
-    // Fezandipiti ex ASC 142 is not a printing this dataset carries.
-    const deck = resolveDeck('1 Fezandipiti ex ASC 142')
+    // SVI has rotated out of Standard so that printing is absent, but the card
+    // is still legal under a newer one.
+    const deck = resolveDeck('1 Ultra Ball SVI 196')
     expect(deck.entries[0].method).toBe('name-fallback')
-    expect(deck.cards[0].resolvedName).toBe('Fezandipiti ex')
+    expect(deck.cards[0].resolvedName).toBe('Ultra Ball')
     expect(deck.warnings).toHaveLength(1)
   })
+
 
   it('counts unknown cards even though they carry no metadata', () => {
     const deck = resolveDeck('3 Totally Made Up Card XYZ 99\n4 Ultra Ball MEG 131')
@@ -168,8 +183,9 @@ describe('resolveDeck', () => {
 describe('card database', () => {
   it('is the generated artefact we expect', () => {
     // Guards against a stale or truncated cards.json reaching the bundle.
-    expect(cardDbMeta.cardCount).toBe(1267)
-    expect(cardDbMeta.sourceRows).toBe(2022)
-    expect(cardDbMeta.sourceSha256).toMatch(/^[0-9a-f]{64}$/)
+    expect(cardDbMeta.cardCount).toBeGreaterThan(1400)
+    expect(cardDbMeta.printingCount).toBeGreaterThan(3000)
+    expect(cardDbMeta.sourceSha256.tcgdex).toMatch(/^[0-9a-f]{64}$/)
+    expect(cardDbMeta.sourceSha256.csv).toMatch(/^[0-9a-f]{64}$/)
   })
 })

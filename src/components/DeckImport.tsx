@@ -39,9 +39,11 @@ interface Props {
   text: string
   deck: Deck
   onChange: (text: string) => void
+  /** Adjust a single decklist line by +1 / -1, editing the pasted text. */
+  onAdjust: (rawLine: string, delta: number) => void
 }
 
-export function DeckImport({ text, deck, onChange }: Props) {
+export function DeckImport({ text, deck, onChange, onAdjust }: Props) {
   const summary = summarize(deck)
   const hasText = text.trim() !== ''
 
@@ -137,23 +139,49 @@ export function DeckImport({ text, deck, onChange }: Props) {
           )}
 
           {deck.cards.length > 0 && (
-            <details className="rounded-lg border border-slate-200 bg-white text-sm dark:border-slate-800 dark:bg-slate-900">
+            <details
+              open
+              className="rounded-lg border border-slate-200 bg-white text-sm dark:border-slate-800 dark:bg-slate-900"
+            >
               <summary className="cursor-pointer px-3 py-2 font-medium">
-                Resolved {plural(deck.cards.length, 'card')}
+                {plural(deck.cards.length, 'card')} — use ± to change counts
               </summary>
-              <ul className="max-h-64 divide-y divide-slate-100 overflow-y-auto px-3 pb-2 dark:divide-slate-800">
-                {deck.cards.map((card) => (
-                  <li key={card.key} className="flex items-baseline gap-2 py-1 text-xs">
-                    <span className="tnum w-6 shrink-0 text-right text-slate-500">
-                      {card.count}
-                    </span>
-                    <span className="grow">{card.label}</span>
-                    <span className="shrink-0 text-slate-500">{categoryOf(card)}</span>
-                    <span className="w-24 shrink-0 truncate text-right text-slate-400">
-                      {card.printings.join(', ')}
-                    </span>
-                  </li>
-                ))}
+              <ul className="max-h-72 divide-y divide-slate-100 overflow-y-auto px-3 pb-2 dark:divide-slate-800">
+                {deck.cards.map((card) => {
+                  // Edits target a real line in the pasted text, so a card that
+                  // appears under several printings adjusts its first one.
+                  const line = deck.entries.find(
+                    (entry) =>
+                      (entry.card ? `id:${entry.card.index}` : `name:${entry.name}`) === card.key ||
+                      entry.name === card.label,
+                  )
+                  return (
+                    <li key={card.key} className="flex items-center gap-2 py-1 text-xs">
+                      <span className="flex shrink-0 items-center gap-0.5">
+                        <Step
+                          label={`One fewer ${card.label}`}
+                          disabled={!line}
+                          onClick={() => line && onAdjust(line.raw, -1)}
+                        >
+                          −
+                        </Step>
+                        <span className="tnum w-5 text-center font-medium">{card.count}</span>
+                        <Step
+                          label={`One more ${card.label}`}
+                          disabled={!line}
+                          onClick={() => line && onAdjust(line.raw, 1)}
+                        >
+                          +
+                        </Step>
+                      </span>
+                      <span className="grow truncate">{card.label}</span>
+                      <span className="shrink-0 text-slate-500">{categoryOf(card)}</span>
+                      <span className="hidden w-24 shrink-0 truncate text-right text-slate-400 sm:block">
+                        {card.printings.join(', ')}
+                      </span>
+                    </li>
+                  )
+                })}
               </ul>
             </details>
           )}
@@ -183,6 +211,31 @@ const TONES: Record<Tone, string> = {
   good: 'border-emerald-400 text-emerald-700 dark:border-emerald-600 dark:text-emerald-400',
   warn: 'border-amber-400 text-amber-700 dark:border-amber-600 dark:text-amber-400',
   bad: 'border-rose-400 text-rose-700 dark:border-rose-600 dark:text-rose-400',
+}
+
+function Step({
+  children,
+  label,
+  disabled,
+  onClick,
+}: {
+  children: React.ReactNode
+  label: string
+  disabled?: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      className="h-5 w-5 rounded border border-slate-300 leading-none text-slate-600 hover:border-sky-400 hover:bg-sky-50 hover:text-sky-700 disabled:opacity-30 dark:border-slate-700 dark:text-slate-300 dark:hover:border-sky-600 dark:hover:bg-sky-950/50"
+    >
+      {children}
+    </button>
+  )
 }
 
 function Chip({ label, tone = 'plain' }: { label: string; tone?: Tone }) {

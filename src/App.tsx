@@ -4,12 +4,15 @@ import { ConditionBuilder } from './components/ConditionBuilder'
 import { DeckImport } from './components/DeckImport'
 import { PrizeRisk } from './components/PrizeRisk'
 import { ResultsPanel } from './components/ResultsPanel'
+import { SampleHand } from './components/SampleHand'
 import { SensitivityTable } from './components/SensitivityTable'
 import { cardDbMeta } from './lib/card-db'
-import { analyze, type Requirement } from './lib/prob/analyze'
+import { allRequirements, analyze, type Condition } from './lib/prob/analyze'
 import { prizeRiskRows } from './lib/prob/prizes'
 import { sensitivity } from './lib/prob/sensitivity'
+import { adjustLineCount } from './lib/edit-decklist'
 import { resolveDeck } from './lib/resolve-cards'
+import { sampleHand, type SampleMode } from './lib/sample-hand'
 import { seedCondition } from './lib/seed-condition'
 
 /** Identity of the deck's card set, ignoring copy counts. */
@@ -17,7 +20,7 @@ const cardSignature = (keys: string[]): string => [...keys].sort().join('|')
 
 export default function App() {
   const [text, setText] = useState('')
-  const [requirements, setRequirements] = useState<Requirement[]>([])
+  const [condition, setCondition] = useState<Condition>([])
   const [edited, setEdited] = useState(false)
 
   const deck = useMemo(() => resolveDeck(text), [text])
@@ -32,32 +35,44 @@ export default function App() {
   const [lastSignature, setLastSignature] = useState<string | null>(null)
   if (lastSignature !== signature) {
     setLastSignature(signature)
-    setRequirements(seedCondition(deck.cards))
+    setCondition(seedCondition(deck.cards))
     setEdited(false)
   }
 
-  const editRequirements = (next: Requirement[]) => {
-    setRequirements(next)
+  const editCondition = (next: Condition) => {
+    setCondition(next)
     setEdited(true)
   }
 
   const reseed = () => {
-    setRequirements(seedCondition(deck.cards))
+    setCondition(seedCondition(deck.cards))
     setEdited(false)
   }
 
-  const analysis = useMemo(() => analyze(deck.cards, requirements), [deck, requirements])
+  const adjust = (rawLine: string, delta: number) =>
+    setText((current) => adjustLineCount(current, rawLine, delta))
+
+  const analysis = useMemo(() => analyze(deck.cards, condition), [deck, condition])
+
+  // Re-sampled whenever the deck, the condition or the mode changes, and on demand.
+  const [reroll, setReroll] = useState(0)
+  const [sampleMode, setSampleMode] = useState<SampleMode>('meets')
+  const hand = useMemo(
+    () => sampleHand(deck.cards, condition, { mode: sampleMode }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `reroll` is the trigger
+    [deck, condition, sampleMode, reroll],
+  )
 
   // Sensitivity is the heavy part (tens of milliseconds). Deferring it keeps
   // typing in the decklist and condition fields responsive; it is still
   // synchronous and exact, just allowed to lag a frame behind.
-  const deferred = useDeferredValue({ cards: deck.cards, requirements })
+  const deferred = useDeferredValue({ cards: deck.cards, condition })
   const sensitivityRows = useMemo(
-    () => sensitivity(deferred.cards, deferred.requirements),
+    () => sensitivity(deferred.cards, deferred.condition),
     [deferred],
   )
   const prizes = useMemo(
-    () => prizeRiskRows(deferred.cards, deferred.requirements),
+    () => prizeRiskRows(deferred.cards, allRequirements(deferred.condition)),
     [deferred],
   )
 
@@ -74,18 +89,25 @@ export default function App() {
       </header>
 
       <main className="space-y-10">
-        <DeckImport text={text} deck={deck} onChange={setText} />
+        <DeckImport text={text} deck={deck} onChange={setText} onAdjust={adjust} />
 
         {hasDeck && (
           <>
             <ConditionBuilder
               cards={deck.cards}
-              requirements={requirements}
+              condition={condition}
               seeded={!edited}
-              onChange={editRequirements}
+              onChange={editCondition}
               onReseed={reseed}
             />
             <ResultsPanel analysis={analysis} />
+            <SampleHand
+              hand={hand}
+              condition={condition}
+              mode={sampleMode}
+              onModeChange={setSampleMode}
+              onReroll={() => setReroll((n) => n + 1)}
+            />
             <SensitivityTable rows={sensitivityRows} />
             <PrizeRisk cards={prizes.cards} groups={prizes.groups} />
           </>

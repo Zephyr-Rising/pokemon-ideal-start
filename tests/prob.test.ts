@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
-import { analyze, type Requirement } from '../src/lib/prob/analyze'
+import { analyze, type Condition, type Requirement } from '../src/lib/prob/analyze'
 import { binom } from '../src/lib/prob/binom'
 import { resolveDeck } from '../src/lib/resolve-cards'
 import type { DeckCard } from '../src/lib/types'
@@ -32,6 +32,12 @@ function req(
 ): Requirement {
   return { id, label: id, cardKeys, op, n }
 }
+
+/** Wrap rows as a single alternative - the common case of one route. */
+const route = (requirements: Requirement[]): Condition => [
+  { id: 'route', label: 'Route', requirements },
+]
+
 
 const keyOf = (cards: DeckCard[], label: string): string => {
   const card = cards.find((c) => c.label === label)
@@ -80,7 +86,7 @@ describe('DP agrees with the closed form', () => {
     // With no illegal hands, mulligan conditioning is vacuous, so the 8-card
     // number must equal the textbook unconditional probability.
     const cards = [dc('target', 4, ['basic']), dc('filler', 56, ['basic'])]
-    const result = analyze(cards, [req('r', ['target'], 1)])
+    const result = analyze(cards, route([req('r', ['target'], 1)]))
 
     expect(result.mulliganRate).toBe(0)
     expect(result.firstLook).toBeCloseTo(hypergeomAtLeast(60, 4, 8, 1), 12)
@@ -89,7 +95,7 @@ describe('DP agrees with the closed form', () => {
 
   it('handles a threshold above 1', () => {
     const cards = [dc('target', 6, ['basic']), dc('filler', 54, ['basic'])]
-    const result = analyze(cards, [req('r', ['target'], 2)])
+    const result = analyze(cards, route([req('r', ['target'], 2)]))
     expect(result.firstLook).toBeCloseTo(hypergeomAtLeast(60, 6, 8, 2), 12)
   })
 })
@@ -107,12 +113,12 @@ describe('DP agrees with exhaustive enumeration', () => {
   const masks = expandMasks(cards, requirements)
 
   it('matches on the opening 7', () => {
-    const result = analyze(cards, requirements)
+    const result = analyze(cards, route(requirements))
     expect(result.openingHand).toBeCloseTo(bruteForceOpening(masks, requirements, 7)!, 12)
   })
 
   it('matches on the 8-card first look', () => {
-    const result = analyze(cards, requirements)
+    const result = analyze(cards, route(requirements))
     expect(result.firstLook).toBeCloseTo(bruteForceFirstLook(masks, requirements, 7)!, 12)
   })
 
@@ -121,7 +127,7 @@ describe('DP agrees with exhaustive enumeration', () => {
     for (const op of ops) {
       const rs = [req('g1', ['a', 'b'], 1, op)]
       const m = expandMasks(cards, rs)
-      const result = analyze(cards, rs)
+      const result = analyze(cards, route(rs))
       expect(result.openingHand).toBeCloseTo(bruteForceOpening(m, rs, 7)!, 12)
       expect(result.firstLook).toBeCloseTo(bruteForceFirstLook(m, rs, 7)!, 12)
     }
@@ -134,7 +140,7 @@ describe('DP agrees with exhaustive enumeration', () => {
       req('g3', ['a', 'c', 'd'], 2),
     ]
     const m = expandMasks(cards, rs)
-    const result = analyze(cards, rs)
+    const result = analyze(cards, route(rs))
     expect(result.openingHand).toBeCloseTo(bruteForceOpening(m, rs, 7)!, 12)
     expect(result.firstLook).toBeCloseTo(bruteForceFirstLook(m, rs, 7)!, 12)
   })
@@ -149,7 +155,7 @@ describe('DP agrees with simulation on a real 60-card deck', () => {
       req('energy', [keyOf(cards, 'Grass Energy'), keyOf(cards, 'Psychic Energy')], 1),
     ]
     const masks = expandMasks(cards, requirements)
-    const result = analyze(cards, requirements)
+    const result = analyze(cards, route(requirements))
 
     const sim7 = simulate(masks, requirements, { trials: 400_000, seed: 7, look: 7 })
     const sim8 = simulate(masks, requirements, { trials: 400_000, seed: 8, look: 8 })
@@ -166,7 +172,7 @@ describe('DP agrees with simulation on a real 60-card deck', () => {
       req('ultra', [keyOf(cards, 'Ultra Ball')], 1),
       req('kanga', [keyOf(cards, 'Mega Kangaskhan ex')], 2),
     ]
-    const result = analyze(cards, requirements)
+    const result = analyze(cards, route(requirements))
 
     for (const [i, row] of result.perRequirement.entries()) {
       const single = [requirements[i]]
@@ -192,7 +198,7 @@ describe('legal-hand self-check', () => {
       ],
     ]
     for (const requirements of conditions) {
-      const { diagnostics } = analyze(cards, requirements)
+      const { diagnostics } = analyze(cards, route(requirements))
       expect(diagnostics.legalOpening).toBeCloseTo(diagnostics.legalClosedForm, 12)
       expect(diagnostics.legalFirstLook).toBeCloseTo(diagnostics.legalClosedForm, 12)
     }
@@ -206,7 +212,7 @@ describe('degenerate inputs', () => {
   })
 
   it('reports impossible, not NaN, for a deck with no Basics', () => {
-    const result = analyze([dc('x', 60)], [req('r', ['x'], 1)])
+    const result = analyze([dc('x', 60)], route([req('r', ['x'], 1)]))
     expect(result.impossible).toBe(true)
     expect(result.mulliganRate).toBe(1)
     expect(result.openingHand).toBeNull()
@@ -219,7 +225,7 @@ describe('degenerate inputs', () => {
 
   it('returns exactly 0 when a threshold exceeds the copies available', () => {
     const cards = [dc('target', 2, ['basic']), dc('filler', 58, ['basic'])]
-    const result = analyze(cards, [req('r', ['target'], 3)])
+    const result = analyze(cards, route([req('r', ['target'], 3)]))
     expect(result.firstLook).toBe(0)
     expect(result.openingHand).toBe(0)
   })
@@ -232,8 +238,8 @@ describe('degenerate inputs', () => {
 
   it('ignores requirement card keys that are not in the deck', () => {
     const cards = [dc('a', 10, ['basic']), dc('b', 50)]
-    const withGhost = analyze(cards, [req('r', ['a', 'ghost'], 1)])
-    const without = analyze(cards, [req('r', ['a'], 1)])
+    const withGhost = analyze(cards, route([req('r', ['a', 'ghost'], 1)]))
+    const without = analyze(cards, route([req('r', ['a'], 1)]))
     expect(withGhost.firstLook).toBeCloseTo(without.firstLook!, 12)
   })
 

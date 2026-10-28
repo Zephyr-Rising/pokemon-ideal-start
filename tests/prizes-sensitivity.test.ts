@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { analyze, type Requirement } from '../src/lib/prob/analyze'
+import { analyze, type Condition, type Requirement } from '../src/lib/prob/analyze'
 import { allCopiesPrized, prizeRiskRows } from '../src/lib/prob/prizes'
 import { sensitivity } from '../src/lib/prob/sensitivity'
 import type { DeckCard } from '../src/lib/types'
@@ -18,6 +18,12 @@ function req(
 ): Requirement {
   return { id, label: id, cardKeys, op, n }
 }
+
+/** Wrap rows as a single alternative - the common case of one route. */
+const route = (requirements: Requirement[]): Condition => [
+  { id: 'route', label: 'Route', requirements },
+]
+
 
 /** Build a 60-card deck description for the prize simulator. */
 function prizeDeck(targetCopies: number, targetIsBasic: boolean, basics: number) {
@@ -89,7 +95,7 @@ describe('sensitivity', () => {
   const requirements = [req('r1', ['attacker'], 1), req('r2', ['search'], 1)]
 
   it('omits cards that cannot move the number', () => {
-    const rows = sensitivity(cards, requirements)
+    const rows = sensitivity(cards, route(requirements))
     // 'filler' and 'energy' are in no group; only 'energy' is excluded too since
     // neither is a Basic Pokémon. 'ace' likewise.
     expect(rows.map((r) => r.key).sort()).toEqual(['attacker', 'search'])
@@ -97,12 +103,12 @@ describe('sensitivity', () => {
 
   it('includes a Basic Pokémon even when it is in no group, via the mulligan rate', () => {
     const withBasic = [...cards, dc('spare-basic', 2, ['basic'])]
-    const rows = sensitivity(withBasic, requirements)
+    const rows = sensitivity(withBasic, route(requirements))
     expect(rows.map((r) => r.key)).toContain('spare-basic')
   })
 
   it('cutting a required card lowers the probability, adding one raises it', () => {
-    const rows = sensitivity(cards, requirements)
+    const rows = sensitivity(cards, route(requirements))
     const search = rows.find((r) => r.key === 'search')!
     expect(search.minusOne!).toBeLessThan(0)
     // 'search' is already at 4, so +1 is blocked by the copy limit.
@@ -116,17 +122,17 @@ describe('sensitivity', () => {
       dc('search', 3, ['item']),
       dc('filler', 53, ['item']),
     ]
-    const rows = sensitivity(threeCopies, requirements)
+    const rows = sensitivity(threeCopies, route(requirements))
     const search = rows.find((r) => r.key === 'search')!
 
-    const baseline = analyze(threeCopies, requirements).firstLook!
+    const baseline = analyze(threeCopies, route(requirements)).firstLook!
     const cut = analyze(
       [dc('attacker', 4, ['basic']), dc('search', 2, ['item']), dc('filler', 54, ['item'])],
-      requirements,
+      route(requirements),
     ).firstLook!
     const added = analyze(
       [dc('attacker', 4, ['basic']), dc('search', 4, ['item']), dc('filler', 52, ['item'])],
-      requirements,
+      route(requirements),
     ).firstLook!
 
     expect(search.minusOne!).toBeCloseTo(cut - baseline, 12)
@@ -134,14 +140,14 @@ describe('sensitivity', () => {
   })
 
   it('blocks a second ACE SPEC', () => {
-    const rows = sensitivity(cards, [req('r', ['ace'], 1)])
+    const rows = sensitivity(cards, route([req('r', ['ace'], 1)]))
     const ace = rows.find((r) => r.key === 'ace')!
     expect(ace.plusOne).toBeNull()
     expect(ace.plusOneBlocked).toMatch(/ACE SPEC/)
   })
 
   it('lets basic Energy exceed four copies', () => {
-    const rows = sensitivity(cards, [req('r', ['energy'], 2)])
+    const rows = sensitivity(cards, route([req('r', ['energy'], 2)]))
     const energy = rows.find((r) => r.key === 'energy')!
     expect(energy.plusOne).not.toBeNull()
     expect(energy.plusOneBlocked).toBeUndefined()
@@ -152,14 +158,14 @@ describe('sensitivity', () => {
     // here is either a Basic Pokémon or in the requirement group, so no neutral
     // card exists to trade the slot from.
     const noFiller = [dc('attacker', 20, ['basic']), dc('energy', 40, ['basic-energy', 'energy'])]
-    const rows = sensitivity(noFiller, [req('r', ['energy'], 1)])
+    const rows = sensitivity(noFiller, route([req('r', ['energy'], 1)]))
     const energy = rows.find((r) => r.key === 'energy')!
     expect(energy.plusOne).toBeNull()
     expect(energy.plusOneBlocked).toMatch(/neutral card/)
   })
 
   it('ranks the biggest mover first', () => {
-    const rows = sensitivity(cards, requirements)
+    const rows = sensitivity(cards, route(requirements))
     const impact = (r: (typeof rows)[number]) =>
       Math.max(Math.abs(r.minusOne ?? 0), Math.abs(r.plusOne ?? 0))
     for (let i = 1; i < rows.length; i++) {
@@ -168,7 +174,7 @@ describe('sensitivity', () => {
   })
 
   it('returns nothing when no probability is defined', () => {
-    expect(sensitivity([dc('x', 60)], [req('r', ['x'], 1)])).toEqual([])
+    expect(sensitivity([dc('x', 60)], route([req('r', ['x'], 1)]))).toEqual([])
   })
 })
 

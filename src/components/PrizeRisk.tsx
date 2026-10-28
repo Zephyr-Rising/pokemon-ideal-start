@@ -12,7 +12,7 @@ export function PrizeRisk({ cards, groups }: Props) {
 
   return (
     <section className="space-y-3">
-      <h2 className="text-lg font-semibold">5 · Prize-zone risk</h2>
+      <h2 className="text-lg font-semibold">6 · Prize-zone risk</h2>
       <p className="text-xs text-slate-500">
         Six cards are set aside face down before the game starts, where nothing can search them
         out. These are the odds that <em>every</em> copy ends up there. Cards with more than six
