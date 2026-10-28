@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { analyze, type Condition, type Requirement } from '../src/lib/prob/analyze'
+import {
+  analyze,
+  type Condition, type Requirement,
+  type RequirementOp,
+} from '../src/lib/prob/analyze'
 import { allCopiesPrized, prizeRiskRows } from '../src/lib/prob/prizes'
 import { sensitivity } from '../src/lib/prob/sensitivity'
 import type { DeckCard } from '../src/lib/types'
@@ -14,9 +18,10 @@ function req(
   id: string,
   cardKeys: string[],
   n: number,
-  op: Requirement['op'] = 'atLeast',
+  op: RequirementOp = 'atLeast',
 ): Requirement {
-  return { id, label: id, cardKeys, op, n }
+  // A plain requirement with one option. `optionsOf` builds multi-option ones.
+  return { id, label: id, options: [{ id: `${id}-o`, cardKeys, op, n }] }
 }
 
 /** Wrap rows as a single alternative - the common case of one route. */

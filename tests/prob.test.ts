@@ -3,7 +3,12 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
-import { analyze, type Condition, type Requirement } from '../src/lib/prob/analyze'
+import {
+  allOptions,
+  analyze,
+  type Condition, type Requirement,
+  type RequirementOp,
+} from '../src/lib/prob/analyze'
 import { binom } from '../src/lib/prob/binom'
 import { resolveDeck } from '../src/lib/resolve-cards'
 import type { DeckCard } from '../src/lib/types'
@@ -28,15 +33,20 @@ function req(
   id: string,
   cardKeys: string[],
   n: number,
-  op: Requirement['op'] = 'atLeast',
+  op: RequirementOp = 'atLeast',
 ): Requirement {
-  return { id, label: id, cardKeys, op, n }
+  // A plain requirement with one option. `optionsOf` builds multi-option ones.
+  return { id, label: id, options: [{ id: `${id}-o`, cardKeys, op, n }] }
 }
 
 /** Wrap rows as a single alternative - the common case of one route. */
 const route = (requirements: Requirement[]): Condition => [
   { id: 'route', label: 'Route', requirements },
 ]
+
+/** Oracle masks carry one bit per requirement option. */
+const masksFor = (cards: DeckCard[], condition: Condition) =>
+  expandMasks(cards, allOptions(condition))
 
 
 const keyOf = (cards: DeckCard[], label: string): string => {
@@ -110,26 +120,26 @@ describe('DP agrees with exhaustive enumeration', () => {
     dc('d', 7), //            neither
   ]
   const requirements = [req('g1', ['a', 'b'], 1), req('g2', ['b', 'c'], 1)]
-  const masks = expandMasks(cards, requirements)
+  const masks = masksFor(cards, route(requirements))
 
   it('matches on the opening 7', () => {
     const result = analyze(cards, route(requirements))
-    expect(result.openingHand).toBeCloseTo(bruteForceOpening(masks, requirements, 7)!, 12)
+    expect(result.openingHand).toBeCloseTo(bruteForceOpening(masks, route(requirements), 7)!, 12)
   })
 
   it('matches on the 8-card first look', () => {
     const result = analyze(cards, route(requirements))
-    expect(result.firstLook).toBeCloseTo(bruteForceFirstLook(masks, requirements, 7)!, 12)
+    expect(result.firstLook).toBeCloseTo(bruteForceFirstLook(masks, route(requirements), 7)!, 12)
   })
 
   it('matches for atMost and exactly', () => {
-    const ops: Requirement['op'][] = ['atMost', 'exactly']
+    const ops: RequirementOp[] = ['atMost', 'exactly']
     for (const op of ops) {
       const rs = [req('g1', ['a', 'b'], 1, op)]
-      const m = expandMasks(cards, rs)
+      const m = masksFor(cards, route(rs))
       const result = analyze(cards, route(rs))
-      expect(result.openingHand).toBeCloseTo(bruteForceOpening(m, rs, 7)!, 12)
-      expect(result.firstLook).toBeCloseTo(bruteForceFirstLook(m, rs, 7)!, 12)
+      expect(result.openingHand).toBeCloseTo(bruteForceOpening(m, route(rs), 7)!, 12)
+      expect(result.firstLook).toBeCloseTo(bruteForceFirstLook(m, route(rs), 7)!, 12)
     }
   })
 
@@ -139,10 +149,10 @@ describe('DP agrees with exhaustive enumeration', () => {
       req('g2', ['b', 'c'], 1),
       req('g3', ['a', 'c', 'd'], 2),
     ]
-    const m = expandMasks(cards, rs)
+    const m = masksFor(cards, route(rs))
     const result = analyze(cards, route(rs))
-    expect(result.openingHand).toBeCloseTo(bruteForceOpening(m, rs, 7)!, 12)
-    expect(result.firstLook).toBeCloseTo(bruteForceFirstLook(m, rs, 7)!, 12)
+    expect(result.openingHand).toBeCloseTo(bruteForceOpening(m, route(rs), 7)!, 12)
+    expect(result.firstLook).toBeCloseTo(bruteForceFirstLook(m, route(rs), 7)!, 12)
   })
 })
 
@@ -154,11 +164,11 @@ describe('DP agrees with simulation on a real 60-card deck', () => {
       req('search', [keyOf(cards, 'Ultra Ball'), keyOf(cards, 'Meowth ex')], 1),
       req('energy', [keyOf(cards, 'Grass Energy'), keyOf(cards, 'Psychic Energy')], 1),
     ]
-    const masks = expandMasks(cards, requirements)
+    const masks = masksFor(cards, route(requirements))
     const result = analyze(cards, route(requirements))
 
-    const sim7 = simulate(masks, requirements, { trials: 400_000, seed: 7, look: 7 })
-    const sim8 = simulate(masks, requirements, { trials: 400_000, seed: 8, look: 8 })
+    const sim7 = simulate(masks, route(requirements), { trials: 400_000, seed: 7, look: 7 })
+    const sim8 = simulate(masks, route(requirements), { trials: 400_000, seed: 8, look: 8 })
 
     expect(result.openingHand).toBeCloseTo(sim7, 2)
     expect(result.firstLook).toBeCloseTo(sim8, 2)
@@ -176,7 +186,7 @@ describe('DP agrees with simulation on a real 60-card deck', () => {
 
     for (const [i, row] of result.perRequirement.entries()) {
       const single = [requirements[i]]
-      const sim = simulate(expandMasks(cards, single), single, {
+      const sim = simulate(masksFor(cards, route(single)), route(single), {
         trials: 300_000,
         seed: 100 + i,
         look: 8,

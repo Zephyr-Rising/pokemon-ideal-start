@@ -1,5 +1,5 @@
 import type { DeckCard } from '../types'
-import { allRequirements, analyze, type Condition } from './analyze'
+import { allOptions, analyze, type Condition } from './analyze'
 
 export interface SensitivityRow {
   key: string
@@ -60,7 +60,7 @@ export function sensitivity(cards: DeckCard[], condition: Condition): Sensitivit
   const baseline = analyze(cards, condition)
   if (baseline.firstLook === null) return []
 
-  const grouped = new Set(allRequirements(condition).flatMap((r) => r.cardKeys))
+  const grouped = new Set(allOptions(condition).flatMap((o) => o.cardKeys))
   // Real cards that contribute to nothing — the source of an added copy.
   const neutralDonor = cards.find(
     (c) => !grouped.has(c.key) && !c.tags.includes('basic') && c.count > 0,

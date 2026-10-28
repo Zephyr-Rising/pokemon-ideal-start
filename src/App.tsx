@@ -7,7 +7,12 @@ import { ResultsPanel } from './components/ResultsPanel'
 import { SampleHand } from './components/SampleHand'
 import { SensitivityTable } from './components/SensitivityTable'
 import { cardDbMeta } from './lib/card-db'
-import { allRequirements, analyze, type Condition } from './lib/prob/analyze'
+import {
+  allRequirements,
+  analyze,
+  requirementCardKeys,
+  type Condition,
+} from './lib/prob/analyze'
 import { prizeRiskRows } from './lib/prob/prizes'
 import { sensitivity } from './lib/prob/sensitivity'
 import { adjustLineCount } from './lib/edit-decklist'
@@ -72,7 +77,15 @@ export default function App() {
     [deferred],
   )
   const prizes = useMemo(
-    () => prizeRiskRows(deferred.cards, allRequirements(deferred.condition)),
+    () =>
+      prizeRiskRows(
+        deferred.cards,
+        allRequirements(deferred.condition).map((r) => ({
+          id: r.id,
+          label: r.label,
+          cardKeys: requirementCardKeys(r),
+        })),
+      ),
     [deferred],
   )
 

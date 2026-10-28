@@ -1,4 +1,11 @@
-import { allRequirements, FIRST_LOOK_SIZE, HAND_SIZE, type Condition } from './prob/analyze'
+import {
+  allOptions,
+  allRequirements,
+  FIRST_LOOK_SIZE,
+  HAND_SIZE,
+  type Condition,
+  type Requirement,
+} from './prob/analyze'
 import type { DeckCard } from './types'
 
 /** Whether to look for a hand that meets the condition, or one that misses it. */
@@ -64,17 +71,19 @@ export function sampleHand(
   if (deck.length < HAND_SIZE) return blank
 
   const rows = allRequirements(condition)
-  const inGroup = new Map(rows.map((row) => [row.id, new Set(row.cardKeys)]))
+  const inGroup = new Map(allOptions(condition).map((o) => [o.id, new Set(o.cardKeys)]))
   const isBasic = (card: DeckCard) => card.tags.includes('basic')
 
-  const rowHolds = (hand: DeckCard[], row: (typeof rows)[number]): boolean => {
-    const group = inGroup.get(row.id)!
-    let count = 0
-    for (const card of hand) if (group.has(card.key)) count++
-    if (row.op === 'atLeast') return count >= row.n
-    if (row.op === 'atMost') return count <= row.n
-    return count === row.n
-  }
+  // A requirement holds when any one of its options does.
+  const rowHolds = (hand: DeckCard[], row: Requirement): boolean =>
+    row.options.some((option) => {
+      const group = inGroup.get(option.id)!
+      let count = 0
+      for (const card of hand) if (group.has(card.key)) count++
+      if (option.op === 'atLeast') return count >= option.n
+      if (option.op === 'atMost') return count <= option.n
+      return count === option.n
+    })
 
   const look = Math.min(FIRST_LOOK_SIZE, deck.length)
   let attempts = 0

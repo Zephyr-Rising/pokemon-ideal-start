@@ -69,9 +69,9 @@ export function seedCondition(cards: DeckCard[]): Condition {
     .map((c, index) => ({
       id: `seed-${index}`,
       label: c.label,
-      cardKeys: c.cardKeys,
-      op: 'atLeast' as const,
-      n: 1,
+      // One option to begin with; more can be added as alternative ways to
+      // satisfy the same requirement.
+      options: [{ id: `seed-${index}-a`, cardKeys: c.cardKeys, op: 'atLeast' as const, n: 1 }],
     }))
 
   // A single alternative: one route, every row required. Add more in the UI to

@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest'
 
-import { allRequirements, analyze, type Condition, type Requirement } from '../src/lib/prob/analyze'
+import {
+  allOptions,
+  analyze,
+  type Condition,
+  type Requirement,
+  type RequirementOption,
+  type RequirementOp,
+} from '../src/lib/prob/analyze'
 import { adjustLineCount } from '../src/lib/edit-decklist'
 import { sampleHand } from '../src/lib/sample-hand'
 import type { DeckCard } from '../src/lib/types'
-import { bruteForceConditionFirstLook, expandMasks, mulberry32 } from './oracles'
+import { bruteForceFirstLook, expandMasks, mulberry32 } from './oracles'
 
 function dc(key: string, count: number, tags: string[] = []): DeckCard {
   return { key, label: key, resolvedName: null, count, card: null, printings: [], tags }
@@ -14,12 +21,22 @@ function req(
   id: string,
   cardKeys: string[],
   n: number,
-  op: Requirement['op'] = 'atLeast',
+  op: RequirementOp = 'atLeast',
 ): Requirement {
-  return { id, label: id, cardKeys, op, n }
+  // A plain requirement with one option. `optionsOf` builds multi-option ones.
+  return { id, label: id, options: [{ id: `${id}-o`, cardKeys, op, n }] }
 }
 
 const alt = (id: string, ...requirements: Requirement[]) => ({ id, label: id, requirements })
+
+/** A requirement satisfied by ANY of several differently-shaped tests. */
+function anyOf(id: string, ...options: Omit<RequirementOption, 'id'>[]): Requirement {
+  return {
+    id,
+    label: id,
+    options: options.map((option, i) => ({ ...option, id: `${id}-o${i}` })),
+  }
+}
 
 describe('OR conditions', () => {
   // Small enough to enumerate every hand, with routes that deliberately overlap.
@@ -30,13 +47,9 @@ describe('OR conditions', () => {
       alt('route1', req('r1', ['a'], 1), req('r2', ['c'], 1)),
       alt('route2', req('r3', ['b'], 2)),
     ]
-    const rows = allRequirements(condition)
-    const masks = expandMasks(cards, rows)
+    const masks = expandMasks(cards, allOptions(condition))
     const result = analyze(cards, condition)
-    expect(result.firstLook).toBeCloseTo(
-      bruteForceConditionFirstLook(masks, condition, rows, 7)!,
-      12,
-    )
+    expect(result.firstLook).toBeCloseTo(bruteForceFirstLook(masks, condition, 7)!, 12)
   })
 
   it('matches enumeration when routes share a card', () => {
@@ -44,10 +57,9 @@ describe('OR conditions', () => {
       alt('route1', req('r1', ['a', 'b'], 2)),
       alt('route2', req('r2', ['b', 'c'], 1), req('r3', ['d'], 1)),
     ]
-    const rows = allRequirements(condition)
-    const masks = expandMasks(cards, rows)
+    const masks = expandMasks(cards, allOptions(condition))
     expect(analyze(cards, condition).firstLook).toBeCloseTo(
-      bruteForceConditionFirstLook(masks, condition, rows, 7)!,
+      bruteForceFirstLook(masks, condition, 7)!,
       12,
     )
   })
@@ -69,6 +81,46 @@ describe('OR conditions', () => {
     const one: Condition = [alt('x', req('r', ['a'], 1))]
     const twice: Condition = [alt('x', req('r', ['a'], 1)), alt('y', req('r2', ['a'], 1))]
     expect(analyze(cards, twice).firstLook).toBeCloseTo(analyze(cards, one).firstLook!, 12)
+  })
+
+  it('matches enumeration for an OR inside a requirement', () => {
+    // "1 of a" or "2 of c" cannot be folded into one card group: the thresholds
+    // differ. This is the case options exist for.
+    const condition: Condition = [
+      alt(
+        'route',
+        anyOf('either', { cardKeys: ['a'], op: 'atLeast', n: 1 }, { cardKeys: ['c'], op: 'atLeast', n: 2 }),
+      ),
+    ]
+    const masks = expandMasks(cards, allOptions(condition))
+    expect(analyze(cards, condition).firstLook).toBeCloseTo(
+      bruteForceFirstLook(masks, condition, 7)!,
+      12,
+    )
+  })
+
+  it('an extra option can only make a requirement easier', () => {
+    const narrow: Condition = [alt('r', req('x', ['a'], 2))]
+    const wider: Condition = [
+      alt('r', anyOf('x', { cardKeys: ['a'], op: 'atLeast', n: 2 }, { cardKeys: ['c'], op: 'atLeast', n: 1 })),
+    ]
+    expect(analyze(cards, wider).firstLook!).toBeGreaterThan(analyze(cards, narrow).firstLook!)
+  })
+
+  it('options and routes agree when they express the same thing', () => {
+    // One requirement with two options == two routes each holding one of them,
+    // as long as nothing else is required.
+    const viaOptions: Condition = [
+      alt('r', anyOf('x', { cardKeys: ['a'], op: 'atLeast', n: 1 }, { cardKeys: ['c'], op: 'atLeast', n: 2 })),
+    ]
+    const viaRoutes: Condition = [
+      alt('r1', req('x1', ['a'], 1)),
+      alt('r2', req('x2', ['c'], 2)),
+    ]
+    expect(analyze(cards, viaOptions).firstLook).toBeCloseTo(
+      analyze(cards, viaRoutes).firstLook!,
+      12,
+    )
   })
 
   it('treats an empty condition as satisfied by any legal hand', () => {

@@ -28,7 +28,7 @@ const ALL_DECKS = [
 function rowCards(deckName: string, index = 0): string[] {
   const deck = load(deckName)
   const row = seedCondition(deck.cards)[0].requirements[index]
-  return row.cardKeys.map((key) => deck.cards.find((c) => c.key === key)!.label)
+  return row.options[0].cardKeys.map((key) => deck.cards.find((c) => c.key === key)!.label)
 }
 
 describe('seedCondition', () => {
@@ -40,8 +40,10 @@ describe('seedCondition', () => {
     expect(labels).toContain('Main starter')
     expect(labels).toContain('Pokémon search')
     expect(labels).toContain('Energy')
-    expect(rows.every((r) => r.op === 'atLeast' && r.n === 1)).toBe(true)
-    expect(rows.every((r) => r.cardKeys.length > 0)).toBe(true)
+    // Each seeded requirement starts with exactly one option.
+    expect(rows.every((r) => r.options.length === 1)).toBe(true)
+    expect(rows.every((r) => r.options[0].op === 'atLeast' && r.options[0].n === 1)).toBe(true)
+    expect(rows.every((r) => r.options[0].cardKeys.length > 0)).toBe(true)
   })
 
   // The main line is inferred from copy count, NOT from whether the payoff is a
@@ -71,7 +73,8 @@ describe('seedCondition', () => {
       const deck = load(name)
       for (const alternative of seedCondition(deck.cards)) {
         for (const row of alternative.requirements) {
-          expect(row.cardKeys.length).toBeGreaterThan(0)
+          expect(row.options.length).toBeGreaterThan(0)
+          for (const option of row.options) expect(option.cardKeys.length).toBeGreaterThan(0)
         }
       }
     }
@@ -126,7 +129,11 @@ describe('end-to-end shape', () => {
 
     expect(rows.length).toBeGreaterThan(0)
     // Every row must belong to a requirement group or be a Basic Pokémon.
-    const grouped = new Set(condition.flatMap((a) => a.requirements.flatMap((r) => r.cardKeys)))
+    const grouped = new Set(
+      condition.flatMap((a) =>
+        a.requirements.flatMap((r) => r.options.flatMap((o) => o.cardKeys)),
+      ),
+    )
     for (const row of rows) {
       const card = deck.cards.find((c) => c.key === row.key)!
       expect(grouped.has(row.key) || card.tags.includes('basic')).toBe(true)
