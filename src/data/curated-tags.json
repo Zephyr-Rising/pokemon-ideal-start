@@ -1,0 +1,8 @@
+{
+  "_readme": [
+    "Curated overrides for the role tags inferred by scripts/build-card-db.mjs.",
+    "Effect-text heuristics are imperfect; corrections belong here rather than in the generator.",
+    "Shape: \"<cardId>\": { \"add\": [\"tag\", ...], \"remove\": [\"tag\", ...] }",
+    "Curation wins over inference. Keys that are not numeric card IDs are ignored."
+  ]
+}

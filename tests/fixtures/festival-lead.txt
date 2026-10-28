@@ -1,0 +1,31 @@
+Pokémon: 22
+4 Grookey TWM 14
+4 Thwackey TWM 15
+4 Applin SCR 12
+3 Dipplin TWM 18
+1 Goldeen TWM 44
+1 Seaking PRE 21
+1 Rellor TEF 23
+1 Rabsca TEF 24
+1 Petilil BLK 6
+1 Lilligant JTG 7
+1 Psyduck ASC 39
+
+Trainer: 33
+4 Lillie's Determination MEG 119
+3 Boss's Orders MEG 114
+2 Black Belt's Training JTG 143
+1 Hilda WHT 84
+1 Lana's Aid TWM 155
+4 Buddy-Buddy Poffin TEF 144
+4 Bug Catching Set TWM 143
+4 Poké Pad POR 81
+1 Unfair Stamp TWM 165
+1 Switch MEG 130
+1 Night Stretcher ASC 196
+2 Brave Bangle WHT 80
+1 Air Balloon ASC 181
+4 Festival Grounds TWM 149
+
+Energy: 5
+5 Grass Energy MEE 1

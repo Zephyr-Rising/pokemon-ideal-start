@@ -1,0 +1,28 @@
+Pokémon: 20
+4 Slowpoke SCR 57
+3 Slowking SCR 58
+2 Dunsparce JTG 120
+2 Dudunsparce TEF 129
+2 Kyurem SFA 47
+1 Fezandipiti ex ASC 142
+1 Latias ex SSP 76
+1 Conkeldurr TWM 105
+1 Annihilape SSP 100
+1 Haxorus BLK 70
+1 Meowth ex POR 62
+1 Lillie's Clefairy ex JTG 56
+Trainer: 32
+4 Lillie's Determination MEG 119
+3 Hilda WHT 84
+3 Ciphermaniac's Codebreaking TEF 145
+4 Ultra Ball MEG 131
+4 Poké Pad POR 81
+4 Wondrous Patch PFL 94
+4 Night Stretcher ASC 196
+2 Switch MEG 130
+4 Academy at Night SFA 54
+
+Energy: 8
+4 Telepathic Psychic Energy POR 88
+3 Psychic Energy MEE 5
+1 Enriching Energy SSP 191

@@ -1,0 +1,17 @@
+@import 'tailwindcss';
+
+/* Tailwind v4 is CSS-first: no tailwind.config.js. `dark:` follows the
+   viewer's prefers-color-scheme, so there is no theme toggle to keep in sync. */
+
+@layer base {
+  html {
+    color-scheme: light dark;
+  }
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+  }
+  /* Tabular figures stop percentages jittering as they update. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+}
