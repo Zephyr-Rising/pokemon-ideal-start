@@ -1,5 +1,6 @@
 import { scoreBoard, type FieldGoal, type GoalScore } from '../board/goal'
 import { applyAction, legalActions, type Action, type ActionContext } from './actions'
+import { describeStep } from './describe'
 import { orderActions } from './priorities'
 import { signature, toBoardView, type SimState } from './state'
 
@@ -8,6 +9,10 @@ export interface SearchResult {
   score: GoalScore
   /** The plays that reached it, in order. */
   line: Action[]
+  /** The same plays, as readable text. */
+  steps: string[]
+  /** The board those plays ended on. */
+  finalState: SimState
   /** States expanded. */
   nodes: number
   /** False when the node budget stopped the search before it finished. */
@@ -52,10 +57,12 @@ export function searchBestLine(
 
   let best = scoreBoard(goal, toBoardView(start), labelFor)
   let bestLine: Action[] = []
+  let bestSteps: string[] = []
+  let bestState = start
   let nodes = 0
   let exhausted = true
 
-  const visit = (state: SimState, line: Action[]): void => {
+  const visit = (state: SimState, line: Action[], steps: string[]): void => {
     if (best.strict) return
     if (nodes >= maxNodes) {
       exhausted = false
@@ -71,6 +78,8 @@ export function searchBestLine(
     if (better(score, best)) {
       best = score
       bestLine = line
+      bestSteps = steps
+      bestState = state
     }
     // Nothing further can improve on a board that already meets the goal.
     if (score.strict) return
@@ -79,12 +88,12 @@ export function searchBestLine(
       // Ending the turn adds no board; this state has already been scored.
       if (action.kind === 'end') continue
       for (const next of applyAction(state, action, ctx)) {
-        visit(next, [...line, action])
+        visit(next, [...line, action], [...steps, describeStep(state, next, action)])
         if (best.strict) return
       }
     }
   }
 
-  visit(start, [])
-  return { score: best, line: bestLine, nodes, exhausted }
+  visit(start, [], [])
+  return { score: best, line: bestLine, steps: bestSteps, finalState: bestState, nodes, exhausted }
 }

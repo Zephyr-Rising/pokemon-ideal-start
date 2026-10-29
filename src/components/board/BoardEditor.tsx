@@ -324,7 +324,7 @@ function Palette({
       <h3 className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
         Your deck {picked && <span className="text-sky-600">— now pick a spot</span>}
       </h3>
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-wrap gap-1.5" data-testid="card-palette">
         {placeable.map((card) => (
           <PaletteCard
             key={card.key}
@@ -348,6 +348,8 @@ function PaletteCard({
   onPick: () => void
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: card.key })
+  const [failed, setFailed] = useState(false)
+  const src = cardImageUrl(card)
 
   return (
     <button
@@ -358,15 +360,36 @@ function PaletteCard({
       {...attributes}
       aria-label={`Pick ${card.label}`}
       aria-pressed={picked}
+      title={`${card.count}× ${card.label}`}
       className={[
-        'tnum rounded-full border px-2 py-0.5 text-xs transition-colors',
+        'relative w-[64px] shrink-0 overflow-hidden rounded-md border-2 transition',
         isDragging ? 'opacity-40' : '',
         picked
-          ? 'border-sky-500 bg-sky-600 text-white'
-          : 'border-slate-300 hover:border-sky-400 hover:bg-sky-50 dark:border-slate-700 dark:hover:bg-sky-950/40',
+          ? 'border-sky-500 ring-2 ring-sky-400/60'
+          : 'border-transparent hover:border-sky-400',
       ].join(' ')}
     >
-      {card.count}× {card.label}
+      <span className="block aspect-[245/342] bg-slate-100 dark:bg-slate-800">
+        {src && !failed ? (
+          <img
+            src={src}
+            alt=""
+            loading="lazy"
+            draggable={false}
+            onError={() => setFailed(true)}
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          // Card art is hotlinked, so the name has to carry the tile when it
+          // cannot load — the palette must stay usable offline.
+          <span className="flex h-full items-center justify-center p-1 text-center text-[9px] leading-tight font-medium text-slate-600 dark:text-slate-300">
+            {card.label}
+          </span>
+        )}
+      </span>
+      <span className="tnum absolute bottom-0 left-0 rounded-tr bg-slate-900/75 px-1 text-[10px] text-white">
+        ×{card.count}
+      </span>
     </button>
   )
 }

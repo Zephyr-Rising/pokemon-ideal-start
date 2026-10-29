@@ -1,6 +1,22 @@
 import { goalIsEmpty, type FieldGoal } from '../../lib/board/goal'
 import { pct, plural } from '../../lib/format'
+import type { ExampleSlot } from '../../lib/sim/playtest'
 import type { PlaytestState } from '../../lib/use-playtest'
+
+/** "Dreepy (2 Energy)" — Energy only mentioned when there is some. */
+const describeSlot = (slot: ExampleSlot): string =>
+  slot.energy.length > 0
+    ? `${slot.label} (${slot.energy.length} Energy)`
+    : slot.label
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex gap-2">
+      <dt className="w-16 shrink-0 text-xs text-slate-500">{label}</dt>
+      <dd className="grow">{children}</dd>
+    </div>
+  )
+}
 
 interface Props {
   goal: FieldGoal
@@ -107,6 +123,59 @@ export function PlaytestResults({ goal, state, trials }: Props) {
                     </li>
                   ))}
               </ul>
+            </div>
+          )}
+
+          {result.exampleSteps.length > 0 && (
+            <div
+              data-testid="example-line"
+              className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"
+            >
+              <h3 className="text-sm font-semibold">
+                {result.exampleReached ? 'How it gets there' : 'The closest it came'}
+              </h3>
+              <p className="mt-0.5 mb-3 text-xs text-slate-500">
+                {result.exampleReached
+                  ? 'One real game, played out in full — the opening placement first, then every play in order.'
+                  : 'No game reached the whole board. This is the best any of them managed.'}
+              </p>
+
+              <ol className="space-y-1.5 text-sm">
+                {result.exampleSteps.map((step, index) => (
+                  <li key={`${index}-${step}`} className="flex gap-2">
+                    <span className="tnum w-5 shrink-0 text-right text-xs text-slate-400">
+                      {index + 1}.
+                    </span>
+                    <span>{step}</span>
+                  </li>
+                ))}
+              </ol>
+
+              {result.exampleBoard && (
+                <div className="mt-4 border-t border-slate-100 pt-3 dark:border-slate-800">
+                  <h4 className="mb-2 text-xs font-semibold tracking-wide text-slate-500 uppercase">
+                    Board it ended on
+                  </h4>
+                  <dl className="space-y-1 text-sm">
+                    <Row label="Active">
+                      {result.exampleBoard.active
+                        ? describeSlot(result.exampleBoard.active)
+                        : 'nothing'}
+                    </Row>
+                    <Row label="Bench">
+                      {result.exampleBoard.bench.length > 0
+                        ? result.exampleBoard.bench.map(describeSlot).join(' · ')
+                        : 'empty'}
+                    </Row>
+                    {result.exampleBoard.stadium && (
+                      <Row label="Stadium">{result.exampleBoard.stadium}</Row>
+                    )}
+                    <Row label="In hand">
+                      {plural(result.exampleBoard.handCount, 'card')}
+                    </Row>
+                  </dl>
+                </div>
+              )}
             </div>
           )}
 

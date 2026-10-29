@@ -1,11 +1,11 @@
 import { goalIsEmpty, scoreBoard, type FieldGoal } from '../board/goal'
 import type { DeckCard } from '../types'
-import { draw, type Action } from './actions'
+import { draw } from './actions'
 import { buildContext } from './context'
 import { isImplemented } from './effects'
 import { mulberry32, shuffled } from './rng'
 import { searchBestLine } from './search'
-import { cardName, inPlay, isBasicPokemon, type SimState } from './state'
+import { cardName, energyType, inPlay, isBasicPokemon, type SimState } from './state'
 
 export interface PlaytestOptions {
   trials?: number
@@ -39,9 +39,27 @@ export interface PlaytestResult {
   ignored: string[]
   /** Trials where the node budget stopped the search early. */
   truncated: number
-  /** The plays from the best trial, for display. */
-  exampleLine: Action[]
-  exampleBoard: SimState | null
+  /** The best trial's line of play, as readable text. */
+  exampleSteps: string[]
+  /** The board that line ended on, trimmed to what the UI shows. */
+  exampleBoard: ExampleBoard | null
+  /** Whether that example actually reached the whole goal. */
+  exampleReached: boolean
+}
+
+/** A board, reduced to what the results panel renders. */
+export interface ExampleBoard {
+  active: ExampleSlot | null
+  bench: ExampleSlot[]
+  stadium: string | null
+  handCount: number
+}
+
+export interface ExampleSlot {
+  cardKey: string
+  label: string
+  /** Energy type symbols attached. */
+  energy: string[]
 }
 
 const DEFAULT_TRIALS = 1_500
@@ -97,8 +115,9 @@ export function playtest(
     mulliganRate: 0,
     ignored,
     truncated: 0,
-    exampleLine: [],
+    exampleSteps: [],
     exampleBoard: null,
+    exampleReached: false,
   }
   if (deck.length < 13 || !deck.some(isBasicPokemon)) return blank
   // An empty goal is met by every board; running trials would say nothing.
@@ -112,8 +131,9 @@ export function playtest(
   const partHits = new Map<string, { label: string; hits: number }>()
 
   let bestCloseness = -1
-  let exampleLine: Action[] = []
-  let exampleBoard: SimState | null = null
+  let exampleSteps: string[] = []
+  let exampleBoard: ExampleBoard | null = null
+  let exampleReached = false
 
   for (let trial = 0; trial < trials; trial++) {
     const rng = mulberry32(seed + trial * 7919)
@@ -140,7 +160,7 @@ export function playtest(
     })
 
     let best = scoreBoard(goal, { active: null, bench: [], stadiumKey: null, hand: [] }, labelFor)
-    let bestLine: Action[] = []
+    let bestSteps: string[] = []
     let bestState: SimState | null = null
     let hitBudget = false
 
@@ -162,6 +182,9 @@ export function playtest(
       const started = draw(placed, 1)
 
       const result = searchBestLine(started, goal, ctx, labelFor, { maxNodes: options.maxNodes })
+      // The opening placement happens before the search, so it has to be put
+      // back at the head of the line - it is the decision most worth seeing.
+      const opening = `Start with ${hand[handIndex].label} in the Active Spot`
       if (!result.exhausted) hitBudget = true
       if (
         result.score.strict !== best.strict
@@ -169,8 +192,8 @@ export function playtest(
           : result.score.closeness > best.closeness
       ) {
         best = result.score
-        bestLine = result.line
-        bestState = started
+        bestSteps = [opening, ...result.steps]
+        bestState = result.finalState
       }
       if (best.strict) break
     }
@@ -186,8 +209,9 @@ export function playtest(
 
     if (best.closeness > bestCloseness) {
       bestCloseness = best.closeness
-      exampleLine = bestLine
-      exampleBoard = bestState
+      exampleSteps = bestSteps
+      exampleBoard = bestState ? toExampleBoard(bestState) : null
+      exampleReached = best.strict
     }
 
     if (options.onProgress && (trial + 1) % (options.progressEvery ?? 100) === 0) {
@@ -210,7 +234,23 @@ export function playtest(
     mulliganRate: deals === 0 ? 0 : mulligans / deals,
     ignored,
     truncated,
-    exampleLine,
+    exampleSteps,
     exampleBoard,
+    exampleReached,
+  }
+}
+
+/** Trim a finished state to the handful of fields the results panel renders. */
+function toExampleBoard(state: SimState): ExampleBoard {
+  const slot = (entry: SimState['bench'][number]): ExampleSlot => ({
+    cardKey: entry.card.key,
+    label: entry.card.label,
+    energy: entry.energy.map(energyType),
+  })
+  return {
+    active: state.active ? slot(state.active) : null,
+    bench: state.bench.map(slot),
+    stadium: state.stadium ? cardName(state.stadium) : null,
+    handCount: state.hand.length,
   }
 }

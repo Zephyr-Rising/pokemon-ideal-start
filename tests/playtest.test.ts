@@ -157,10 +157,29 @@ describe('the simulator actually plays cards', () => {
     expect(result.strict).toBeGreaterThan(0.2)
   }, 30_000)
 
-  it('reports an example line of play', () => {
+  it('reports an example line of play, in readable steps', () => {
     const g = goal({ active: slot('a', keyOf(cards, 'Mega Kangaskhan ex')), benchMin: 2 })
     const result = playtest(cards, g, labelFor(cards), { trials: 200, seed: 61 })
-    expect(result.exampleLine.length).toBeGreaterThan(0)
-    expect(result.exampleBoard).not.toBeNull()
+
+    expect(result.exampleSteps.length).toBeGreaterThan(0)
+    expect(result.exampleReached).toBe(true)
+    // Every step names a card and reads as an instruction, not an opcode.
+    expect(result.exampleSteps[0]).toMatch(/^Start with Mega Kangaskhan ex in the Active Spot$/)
+    for (const step of result.exampleSteps) expect(step).not.toMatch(/handIndex|undefined/)
+
+    // The board shown is the one the line ended on, not the one it started from.
+    expect(result.exampleBoard?.active?.label).toBe('Mega Kangaskhan ex')
+    expect(result.exampleBoard!.bench.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('explains what a search card actually fetched', () => {
+    // Descriptions are built by diffing the state either side of a play, so an
+    // effect reports what it really did rather than repeating its card text.
+    const g = goal({ benchMin: 5 })
+    const result = playtest(cards, g, labelFor(cards), { trials: 400, seed: 71 })
+    const joined = result.exampleSteps.join(' | ')
+    expect(result.exampleSteps.length).toBeGreaterThan(0)
+    // Reaching five benched needs a search card, and the step must say what it found.
+    expect(joined).toMatch(/Play .+ — (benching|taking|drawing)/)
   })
 })
