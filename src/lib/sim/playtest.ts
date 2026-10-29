@@ -12,6 +12,9 @@ export interface PlaytestOptions {
   seed?: number
   /** Search budget per opening placement. */
   maxNodes?: number
+  /** Called every `progressEvery` trials so a long run can report in. */
+  onProgress?: (done: number, total: number) => void
+  progressEvery?: number
 }
 
 export interface PartStat {
@@ -185,6 +188,10 @@ export function playtest(
       bestCloseness = best.closeness
       exampleLine = bestLine
       exampleBoard = bestState
+    }
+
+    if (options.onProgress && (trial + 1) % (options.progressEvery ?? 100) === 0) {
+      options.onProgress(trial + 1, trials)
     }
   }
 

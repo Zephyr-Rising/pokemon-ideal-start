@@ -1,10 +1,16 @@
 # Ideal Start
 
-Exact opening-hand odds for a Pokémon TCG deck. Paste a PTCG Live export, describe what your ideal
-start looks like, and see how often the deck actually delivers it — plus what every card count is
-worth and what the prize zone costs you.
+Two questions about a Pokémon TCG deck, from one pasted PTCG Live export:
 
-Everything is computed in the browser, exactly. No backend, no simulation, no sampling error.
+- **Opening hand** — what is in your first 8 cards, computed **exactly**.
+- **Turn 1 board** — what you can actually *build* by the end of your first turn, by dragging the
+  board you want onto a playing field and letting the deck try to reach it.
+
+Everything runs in the browser. No backend.
+
+**The two tabs differ in kind, and the app never blurs them.** Opening-hand odds are a closed form:
+exact, with no sampling error. The turn-1 playtest is a simulation — once a search card digs and
+shuffles, the state space explodes — so it reports a 95% margin of error alongside every figure.
 
 ## What it tells you
 
@@ -18,6 +24,30 @@ Everything is computed in the browser, exactly. No backend, no simulation, no sa
   copy of every card, ranked by impact. Adjust counts in place with the ± controls on the deck list.
 - **Prize-zone risk**: the chance every copy of a card is among the six prizes, where nothing can
   search it out.
+
+#### Turn 1 board
+
+Drag cards from your deck onto an Active spot, a bench, a Stadium slot and a "still in hand" zone,
+set how much Energy each Pokémon should be carrying, and the simulator plays out thousands of games
+trying to build it. Every drop target is also reachable by tapping and by keyboard, so the board
+works on a phone.
+
+For each hand it **searches the possible lines of play** rather than following one fixed policy —
+choosing which Basic takes the Active Spot, what to bench, where to attach, when to retreat — so it
+answers whether a hand *can* reach the board, not whether one particular agent found it. The move
+ordering comes from the competition agent's scoring tiers (`src/lib/sim/priorities.ts`), so the
+sensible line is explored first without being the only one.
+
+You get the strict probability, an average *closeness* score, and a per-part breakdown naming which
+piece of the board is actually costing you.
+
+Two honest caveats the UI states plainly:
+
+- The search knows which cards are prized when it picks the opening placement; a real player does
+  not. Mid-turn this is realistic — a whiffed search is how you find out — so the figure is a mild
+  upper bound.
+- When the node budget stops a search early, that can only *miss* a way through, never invent one,
+  so the reported figure is a floor.
 
 ### Routes (OR)
 
@@ -134,10 +164,34 @@ Two things to set up once:
    project page is served from `https://<user>.github.io/<repo>/`, so a mismatch breaks every asset
    URL. The browser smoke test runs against that exact subpath specifically to catch this.
 
+## The turn-1 simulator
+
+`src/lib/sim/` models the turn exactly: one Energy, one Supporter, one Stadium and one retreat;
+retreat paid by discarding Energy; the bench capped at five, or eight only with Area Zero
+Underdepths **and** a Tera Pokémon in play. Nothing evolves, because everything in play arrived this
+turn — so Rare Candy and every evolution card are correctly dead.
+
+Within a single deal the search is **deterministic**: searching your own deck is a choice, not a
+roll. The only randomness is the shuffle, and shuffle-and-draw effects (Lillie's Determination,
+Judge) seed themselves from the trial plus the state they happen in, so a branch always resolves the
+same way and backtracking stays sound.
+
+`effects.ts` implements the ~20 cards that can change your own board on turn 1. **An unimplemented
+card is inert, never a guess** — effect text is far too irregular to derive behaviour from, and a
+silent misread would corrupt the numbers rather than merely omit a card. The result names every card
+it ignored. Cards that genuinely cannot matter on turn 1 are deliberately absent: Unfair Stamp needs
+one of your Pokémon to have been Knocked Out, Special Red Card needs the opponent down to three
+Prizes, and Boss's Orders only moves theirs.
+
+Plays that cannot bring the board closer to your goal are never generated at all. That pruning made
+the search both faster and *more accurate*, because results now converge at a far smaller node
+budget.
+
+Tera comes from the Kaggle CSV's `Category` column — TCGdex has no Tera marker at all, the word
+appears only in free text — so a Tera Pokémon too new for that CSV is treated as non-Tera, which can
+understate the bench cap rather than overstate it.
+
 ## Roadmap
 
-This answers "what's in my hand". The next phase is a **turn-1 playtest**: simulating actually
-*playing* the first turn — resolving Ultra Ball, Poffin and draw Supporters — and scoring the board
-states that are reachable, rather than only the cards drawn. The groundwork is already here: the card
-database ships effect text and moves, the deck model carries the simulator's card IDs, and the
+The groundwork for going further is here: the card
 compute layer is pure and serializable.

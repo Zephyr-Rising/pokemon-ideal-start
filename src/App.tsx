@@ -1,12 +1,16 @@
 import { useDeferredValue, useMemo, useState } from 'react'
 
+import { BoardEditor } from './components/board/BoardEditor'
+import { PlaytestResults } from './components/board/PlaytestResults'
 import { ConditionBuilder } from './components/ConditionBuilder'
 import { DeckImport } from './components/DeckImport'
 import { PrizeRisk } from './components/PrizeRisk'
 import { ResultsPanel } from './components/ResultsPanel'
 import { SampleHand } from './components/SampleHand'
 import { SensitivityTable } from './components/SensitivityTable'
+import { emptyGoal, type FieldGoal } from './lib/board/goal'
 import { cardDbMeta } from './lib/card-db'
+import { adjustLineCount } from './lib/edit-decklist'
 import {
   allRequirements,
   analyze,
@@ -15,24 +19,31 @@ import {
 } from './lib/prob/analyze'
 import { prizeRiskRows } from './lib/prob/prizes'
 import { sensitivity } from './lib/prob/sensitivity'
-import { adjustLineCount } from './lib/edit-decklist'
 import { resolveDeck } from './lib/resolve-cards'
 import { sampleHand, type SampleMode } from './lib/sample-hand'
 import { seedCondition } from './lib/seed-condition'
+import { usePlaytest } from './lib/use-playtest'
 
 /** Identity of the deck's card set, ignoring copy counts. */
 const cardSignature = (keys: string[]): string => [...keys].sort().join('|')
 
+type Tab = 'hand' | 'board'
+
+const TRIAL_CHOICES = [500, 1500, 4000] as const
+
 export default function App() {
   const [text, setText] = useState('')
   const [condition, setCondition] = useState<Condition>([])
+  const [goal, setGoal] = useState<FieldGoal>(emptyGoal())
   const [edited, setEdited] = useState(false)
+  const [tab, setTab] = useState<Tab>('hand')
+  const [trials, setTrials] = useState<number>(1500)
 
   const deck = useMemo(() => resolveDeck(text), [text])
 
   // Re-seed when the *set* of cards changes — a genuinely different deck — but
   // not when only copy counts change, so tweaking a count never discards the
-  // condition you just built.
+  // condition or board you just built.
   // Held in state rather than a ref: this is React's documented
   // "adjust state when the input changes" pattern, and it stays correct under
   // StrictMode's double-invoked render, where a ref write would be skipped.
@@ -41,6 +52,7 @@ export default function App() {
   if (lastSignature !== signature) {
     setLastSignature(signature)
     setCondition(seedCondition(deck.cards))
+    setGoal(emptyGoal())
     setEdited(false)
   }
 
@@ -89,6 +101,10 @@ export default function App() {
     [deferred],
   )
 
+  // The turn-1 playtest is far too slow for the main thread, so it runs in a
+  // worker and streams progress.
+  const playtest = usePlaytest(deck.cards, goal, trials, 1)
+
   const hasDeck = deck.cards.length > 0
 
   return (
@@ -96,8 +112,8 @@ export default function App() {
       <header className="mb-8">
         <h1 className="text-3xl font-bold tracking-tight">Ideal Start</h1>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-          Exact opening-hand odds for a Pokémon TCG decklist. Paste a PTCG Live export, say what
-          your ideal start looks like, and see how often the deck delivers it.
+          Paste a PTCG Live export, then ask either question: what is in my opening hand, or what
+          board can I actually build by the end of turn 1.
         </p>
       </header>
 
@@ -106,34 +122,102 @@ export default function App() {
 
         {hasDeck && (
           <>
-            <ConditionBuilder
-              cards={deck.cards}
-              condition={condition}
-              seeded={!edited}
-              onChange={editCondition}
-              onReseed={reseed}
-            />
-            <ResultsPanel analysis={analysis} />
-            <SampleHand
-              hand={hand}
-              condition={condition}
-              mode={sampleMode}
-              onModeChange={setSampleMode}
-              onReroll={() => setReroll((n) => n + 1)}
-            />
-            <SensitivityTable rows={sensitivityRows} />
-            <PrizeRisk cards={prizes.cards} groups={prizes.groups} />
+            <div
+              role="tablist"
+              aria-label="What to analyse"
+              className="flex gap-1 border-b border-slate-200 dark:border-slate-800"
+            >
+              <Tab id="hand" active={tab} onSelect={setTab}>
+                Opening hand
+              </Tab>
+              <Tab id="board" active={tab} onSelect={setTab}>
+                Turn 1 board
+              </Tab>
+            </div>
+
+            {tab === 'hand' ? (
+              <div role="tabpanel" className="space-y-10">
+                <ConditionBuilder
+                  cards={deck.cards}
+                  condition={condition}
+                  seeded={!edited}
+                  onChange={editCondition}
+                  onReseed={reseed}
+                />
+                <ResultsPanel analysis={analysis} />
+                <SampleHand
+                  hand={hand}
+                  condition={condition}
+                  mode={sampleMode}
+                  onModeChange={setSampleMode}
+                  onReroll={() => setReroll((n) => n + 1)}
+                />
+                <SensitivityTable rows={sensitivityRows} />
+                <PrizeRisk cards={prizes.cards} groups={prizes.groups} />
+              </div>
+            ) : (
+              <div role="tabpanel" className="space-y-10">
+                <BoardEditor cards={deck.cards} goal={goal} onChange={setGoal} />
+                <PlaytestResults goal={goal} state={playtest} trials={trials} />
+                <label className="flex items-center gap-2 text-xs text-slate-500">
+                  Games played:
+                  <select
+                    value={trials}
+                    onChange={(e) => setTrials(Number(e.target.value))}
+                    className="rounded-md border border-slate-300 px-2 py-1 dark:border-slate-700 dark:bg-slate-950"
+                  >
+                    {TRIAL_CHOICES.map((count) => (
+                      <option key={count} value={count}>
+                        {count.toLocaleString()}
+                      </option>
+                    ))}
+                  </select>
+                  more games narrows the margin of error
+                </label>
+              </div>
+            )}
           </>
         )}
       </main>
 
       <footer className="mt-12 border-t border-slate-200 pt-4 text-xs text-slate-500 dark:border-slate-800">
         <p>
-          Every figure is computed exactly from the deck's composition — no simulation, no sampling
-          error. Card data covers {cardDbMeta.cardCount.toLocaleString()} cards; anything outside
-          it still counts toward the deck but carries no card details.
+          Opening-hand figures are computed exactly from the deck's composition — no simulation, no
+          sampling error. Turn-1 board figures are simulated and carry a stated margin. Card data
+          covers {cardDbMeta.cardCount.toLocaleString()} Standard-legal cards; anything outside it
+          still counts toward the deck but carries no card details.
         </p>
       </footer>
     </div>
+  )
+}
+
+function Tab({
+  id,
+  active,
+  onSelect,
+  children,
+}: {
+  id: Tab
+  active: Tab
+  onSelect: (tab: Tab) => void
+  children: React.ReactNode
+}) {
+  const selected = active === id
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={selected}
+      onClick={() => onSelect(id)}
+      className={[
+        '-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors',
+        selected
+          ? 'border-sky-600 text-sky-700 dark:border-sky-400 dark:text-sky-300'
+          : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200',
+      ].join(' ')}
+    >
+      {children}
+    </button>
   )
 }
