@@ -1,6 +1,5 @@
 import type { Action, ActionContext } from './actions'
-import { ACTIVE_TARGET } from './actions'
-import { isBasicPokemon, type SimState } from './state'
+import { ACTIVE_TARGET, isBasicPokemon, type SimState } from './state'
 
 /**
  * Move ordering, ported from the AI competition agent.
@@ -24,6 +23,7 @@ import { isBasicPokemon, type SimState } from './state'
 const TIER = {
   placeActive: 10_000,
   bench: 8_000,
+  ability: 7_000,
   search: 6_000,
   draw: 5_000,
   energy: 4_000,
@@ -52,6 +52,15 @@ export function actionPriority(state: SimState, action: Action, ctx: ActionConte
       // Filling the bench is the single highest-value setup action, and more so
       // when the goal named this Pokémon or simply wants more bodies.
       return TIER.bench + relevant + (ctx.wantsAnyBench ? 200 : 0)
+
+    case 'useAbility': {
+      // An Ability costs nothing and is capped at once per turn, so it is used
+      // before spending cards from hand — drawing first makes the rest of the
+      // turn better informed. It ranks below benching, because two of them only
+      // come online once their partner is on the bench.
+      const slot = action.target === ACTIVE_TARGET ? state.active : state.bench[action.target]
+      return TIER.ability + (slot && ctx.relevant.has(slot.card.key) ? RELEVANT : 0)
+    }
 
     case 'playItem':
     case 'playSupporter': {

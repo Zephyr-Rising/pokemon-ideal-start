@@ -20,6 +20,8 @@ import {
   setStadium,
   type DropZone,
 } from '../../lib/board/edit'
+import type { DropTarget, DroppedCard } from '../../lib/board/edit'
+import { slotTarget } from '../../lib/board/edit'
 import type { FieldGoal, SlotGoal } from '../../lib/board/goal'
 import { cardImageUrl } from '../../lib/sample-hand'
 import type { DeckCard } from '../../lib/types'
@@ -33,16 +35,25 @@ interface Props {
 const isPokemon = (card: DeckCard) => card.tags.includes('pokemon')
 const isStadiumCard = (card: DeckCard) => card.tags.includes('stadium')
 
+const describeCard = (card: DeckCard): DroppedCard => ({
+  key: card.key,
+  isPokemon: isPokemon(card),
+  isStadium: isStadiumCard(card),
+  isEnergy: card.tags.includes('energy'),
+  isTool: card.tags.includes('tool'),
+  energyType: card.card?.type || null,
+})
+
 export function BoardEditor({ cards, goal, onChange }: Props) {
   // Click-to-place: pick a card, then pick a zone. Keeps the board usable on a
   // touch screen and by keyboard, where dragging is not an option.
   const [picked, setPicked] = useState<string | null>(null)
   const byKey = new Map(cards.map((card) => [card.key, card]))
 
-  const place = (zone: DropZone, cardKey: string) => {
+  const place = (target: DropTarget, cardKey: string) => {
     const card = byKey.get(cardKey)
     if (!card) return
-    onChange(dropCard(goal, zone, cardKey, isPokemon(card), isStadiumCard(card)))
+    onChange(dropCard(goal, target, describeCard(card)))
     setPicked(null)
   }
 
@@ -55,9 +66,11 @@ export function BoardEditor({ cards, goal, onChange }: Props) {
   )
 
   const onDragEnd = (event: DragEndEvent) => {
-    const zone = event.over?.id
+    const target = event.over?.id
     const cardKey = event.active.id
-    if (typeof zone === 'string' && typeof cardKey === 'string') place(zone as DropZone, cardKey)
+    if (typeof target === 'string' && typeof cardKey === 'string') {
+      place(target as DropTarget, cardKey)
+    }
   }
 
   const benchSlots = Math.max(goal.bench.length + 1, Math.min(goal.benchMin + 1, 8))
@@ -81,12 +94,20 @@ export function BoardEditor({ cards, goal, onChange }: Props) {
               </h3>
               <Zone id="active" picked={picked} onPick={place}>
                 {goal.active ? (
-                  <SlotCard
-                    slot={goal.active}
-                    card={byKey.get(goal.active.cardKey)}
-                    onRemove={() => onChange(clearActive(goal))}
-                    onEnergy={(n) => onChange(setSlotEnergy(goal, goal.active!.id, n))}
-                  />
+                  <SlotDrop
+                    slotId={goal.active.id}
+                    name={byKey.get(goal.active.cardKey)?.label ?? 'this Pokémon'}
+                    picked={picked}
+                    onPlace={place}
+                  >
+                    <SlotCard
+                      slot={goal.active}
+                      card={byKey.get(goal.active.cardKey)}
+                      tools={goal.active.tools.map((key) => byKey.get(key)?.label ?? key)}
+                      onRemove={() => onChange(clearActive(goal))}
+                      onEnergy={(n) => onChange(setSlotEnergy(goal, goal.active!.id, n))}
+                    />
+                  </SlotDrop>
                 ) : (
                   <Empty label="Active" />
                 )}
@@ -115,13 +136,21 @@ export function BoardEditor({ cards, goal, onChange }: Props) {
               <Zone id="bench" picked={picked} onPick={place}>
                 <div className="flex flex-wrap gap-2">
                   {goal.bench.map((slot) => (
-                    <SlotCard
+                    <SlotDrop
                       key={slot.id}
-                      slot={slot}
-                      card={byKey.get(slot.cardKey)}
-                      onRemove={() => onChange(removeBench(goal, slot.id))}
-                      onEnergy={(n) => onChange(setSlotEnergy(goal, slot.id, n))}
-                    />
+                      slotId={slot.id}
+                      name={byKey.get(slot.cardKey)?.label ?? 'this Pokémon'}
+                      picked={picked}
+                      onPlace={place}
+                    >
+                      <SlotCard
+                        slot={slot}
+                        card={byKey.get(slot.cardKey)}
+                        tools={slot.tools.map((key) => byKey.get(key)?.label ?? key)}
+                        onRemove={() => onChange(removeBench(goal, slot.id))}
+                        onEnergy={(n) => onChange(setSlotEnergy(goal, slot.id, n))}
+                      />
+                    </SlotDrop>
                   ))}
                   {Array.from({ length: Math.max(0, benchSlots - goal.bench.length) }).map(
                     (_, i) => (
@@ -192,7 +221,7 @@ function Zone({
 }: {
   id: DropZone
   picked: string | null
-  onPick: (zone: DropZone, cardKey: string) => void
+  onPick: (target: DropTarget, cardKey: string) => void
   children: React.ReactNode
 }) {
   const { setNodeRef, isOver } = useDroppable({ id })
@@ -231,6 +260,54 @@ function Zone({
   )
 }
 
+/**
+ * A Pokémon already on the board, as a drop target.
+ *
+ * Energy and Tools belong to a particular Pokémon rather than to the board, so
+ * they are dropped onto the card itself. Tapping works the same way, which is
+ * what makes this usable on a touch screen.
+ */
+function SlotDrop({
+  slotId,
+  name,
+  picked,
+  onPlace,
+  children,
+}: {
+  slotId: string
+  name: string
+  picked: string | null
+  onPlace: (target: DropTarget, cardKey: string) => void
+  children: React.ReactNode
+}) {
+  const target = slotTarget(slotId)
+  const { setNodeRef, isOver } = useDroppable({ id: target })
+  const armed = picked !== null
+
+  return (
+    <div
+      ref={setNodeRef}
+      onClick={armed ? () => onPlace(target, picked) : undefined}
+      role={armed ? 'button' : undefined}
+      aria-label={armed ? `Attach to ${name}` : undefined}
+      tabIndex={armed ? 0 : undefined}
+      onKeyDown={
+        armed
+          ? (event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                onPlace(target, picked)
+              }
+            }
+          : undefined
+      }
+      className={isOver ? 'rounded-lg ring-2 ring-sky-500' : undefined}
+    >
+      {children}
+    </div>
+  )
+}
+
 function Empty({ label }: { label: string }) {
   return (
     <div className="flex h-[118px] w-[84px] items-center justify-center rounded-md border border-slate-200 text-[11px] text-slate-400 dark:border-slate-800">
@@ -243,12 +320,14 @@ function SlotCard({
   slot,
   card,
   count,
+  tools,
   onRemove,
   onEnergy,
 }: {
   slot?: SlotGoal
   card: DeckCard | undefined
   count?: number
+  tools?: string[]
   onRemove: () => void
   onEnergy?: (energy: number) => void
 }) {
@@ -300,6 +379,11 @@ function SlotCard({
             +
           </button>
         </label>
+      )}
+      {tools && tools.length > 0 && (
+        <p className="truncate text-center text-[9px] text-sky-700 dark:text-sky-400" title={tools.join(', ')}>
+          + {tools.join(', ')}
+        </p>
       )}
       {!onEnergy && <figcaption className="truncate text-center text-[10px]">{name}</figcaption>}
     </figure>

@@ -1,7 +1,9 @@
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
+import { abilityAvailable, abilityOf, onBenchPlay, useAbility } from './abilities'
 import { lookupEffect, type EffectContext } from './effects'
 import {
+  ACTIVE_TARGET,
   benchCap,
   cardName,
   cloneState,
@@ -33,11 +35,9 @@ export type Action =
   | { kind: 'playItem'; handIndex: number }
   | { kind: 'playSupporter'; handIndex: number }
   | { kind: 'playStadium'; handIndex: number }
+  | { kind: 'useAbility'; target: number }
   | { kind: 'retreat'; benchIndex: number }
   | { kind: 'end' }
-
-/** Target index convention: -1 is the Active, 0+ indexes the bench. */
-export const ACTIVE_TARGET = -1
 
 export interface ActionContext extends EffectContext {
   /** Card keys the goal mentions — used to bound effect choices. */
@@ -92,6 +92,16 @@ export function legalActions(state: SimState, ctx: ActionContext): Action[] {
       actions.push({ kind: 'bench', handIndex })
     }
   })
+
+  // Abilities are free and capped at once per turn, so they are offered
+  // wherever they are usable. The only one worth pruning is a switch, which
+  // cannot help a goal that does not name an Active.
+  for (const target of targets(state)) {
+    if (!abilityAvailable(state, target)) continue
+    const def = abilityOf(slotAt(state, target)!.card)!
+    if (def.switchesActive && ctx.activeKey === null) continue
+    actions.push({ kind: 'useAbility', target })
+  }
 
   // Attaching Energy the goal never asked for cannot bring the board closer,
   // and it is the single biggest source of pointless branching.
@@ -151,7 +161,7 @@ export function legalActions(state: SimState, ctx: ActionContext): Action[] {
   // Retreating only changes which Pokémon is Active, so it is pointless unless
   // the goal names one.
   if (ctx.activeKey !== null && !state.usedRetreat && state.bench.length > 0 && state.active) {
-    const cost = retreatCost(state.active)
+    const cost = retreatCost(state, state.active)
     if (state.active.energy.length >= cost) {
       const seenTarget = new Set<string>()
       state.bench.forEach((slot, benchIndex) => {
@@ -191,8 +201,13 @@ export function applyAction(state: SimState, action: Action, ctx: ActionContext)
     case 'bench': {
       const { card, next } = take(state, action.handIndex)
       next.bench.push(inPlay(card))
-      return [next]
+      // Meowth ex and Iron Leaves ex trigger as they arrive, so benching can
+      // lead to several boards.
+      return onBenchPlay(next, next.bench.length - 1, ctx)
     }
+
+    case 'useAbility':
+      return useAbility(state, action.target, ctx)
 
     case 'attachEnergy': {
       const { card, next } = take(state, action.handIndex)
@@ -232,7 +247,7 @@ export function applyAction(state: SimState, action: Action, ctx: ActionContext)
     case 'retreat': {
       const next = cloneState(state)
       const active = next.active!
-      const cost = retreatCost(active)
+      const cost = retreatCost(state, active)
       // Paying the cost discards that much Energy from the retreating Pokémon.
       for (let i = 0; i < cost; i++) {
         const paid = active.energy.pop()
@@ -257,4 +272,4 @@ export function draw(state: SimState, count: number): SimState {
   return next
 }
 
-export { energyType }
+export { ACTIVE_TARGET, energyType }

@@ -49,6 +49,7 @@ const state = (over: Partial<SimState> = {}): SimState => ({
   usedSupporter: false,
   usedStadium: false,
   usedRetreat: false,
+  usedAbilities: [],
   ...over,
 })
 

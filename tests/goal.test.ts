@@ -12,7 +12,18 @@ import {
 
 const label = (key: string) => key
 
-const mon = (cardKey: string, ...energy: string[]): BoardPokemon => ({ cardKey, energy })
+const mon = (cardKey: string, ...energy: string[]): BoardPokemon => ({
+  cardKey,
+  energy,
+  tools: [],
+})
+
+/** A Pokémon carrying Tools as well. */
+const equipped = (cardKey: string, tools: string[], ...energy: string[]): BoardPokemon => ({
+  cardKey,
+  energy,
+  tools,
+})
 
 const board = (over: Partial<BoardView> = {}): BoardView => ({
   active: null,
@@ -22,12 +33,13 @@ const board = (over: Partial<BoardView> = {}): BoardView => ({
   ...over,
 })
 
-const slot = (id: string, cardKey: string, energy = 0, energyType: string | null = null): SlotGoal => ({
-  id,
-  cardKey,
-  energy,
-  energyType,
-})
+const slot = (
+  id: string,
+  cardKey: string,
+  energy = 0,
+  energyType: string | null = null,
+  tools: string[] = [],
+): SlotGoal => ({ id, cardKey, energy, energyType, tools })
 
 const goal = (over: Partial<FieldGoal> = {}): FieldGoal => ({ ...emptyGoal(), ...over })
 
@@ -107,6 +119,34 @@ describe('bench slots', () => {
     // One card part met, one Energy part met, the other two missed.
     expect(score.parts.filter((p) => p.met)).toHaveLength(2)
     expect(score.strict).toBe(false)
+  })
+})
+
+describe('tools', () => {
+  it('is met only when the Tool is on the Pokémon that asked for it', () => {
+    const g = goal({ active: slot('a', 'dreepy', 0, null, ['belt']) })
+    expect(scoreBoard(g, board({ active: equipped('dreepy', ['belt']) }), label).strict).toBe(true)
+    expect(scoreBoard(g, board({ active: equipped('dreepy', []) }), label).strict).toBe(false)
+    // The right Tool on the wrong Pokémon is not the board that was asked for.
+    expect(scoreBoard(g, board({ active: equipped('budew', ['belt']) }), label).strict).toBe(false)
+  })
+
+  it('counts each Tool as its own part', () => {
+    const g = goal({ bench: [slot('b', 'dreepy', 0, null, ['belt', 'cape'])] })
+    const score = scoreBoard(g, board({ bench: [equipped('dreepy', ['belt'])] }), label)
+    // Card part met, one Tool met, one missed.
+    expect(score.parts).toHaveLength(3)
+    expect(score.parts.filter((p) => p.met)).toHaveLength(2)
+  })
+
+  it('pairs the Tool-hungry slot with the Pokémon actually carrying one', () => {
+    const g = goal({ bench: [slot('b1', 'dreepy', 0, null, ['belt']), slot('b2', 'dreepy')] })
+    const score = scoreBoard(
+      g,
+      board({ bench: [equipped('dreepy', []), equipped('dreepy', ['belt'])] }),
+      label,
+    )
+    expect(score.strict).toBe(true)
   })
 })
 

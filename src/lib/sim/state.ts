@@ -34,7 +34,12 @@ export interface SimState {
   usedSupporter: boolean
   usedStadium: boolean
   usedRetreat: boolean
+  /** Normalised names of Abilities already used this turn. */
+  usedAbilities: string[]
 }
+
+/** Target index convention: -1 is the Active Spot, 0+ indexes the bench. */
+export const ACTIVE_TARGET = -1
 
 export const BASE_BENCH = 5
 const EXPANDED_BENCH = 8
@@ -82,8 +87,21 @@ export const isTool = (card: DeckCard): boolean => card.tags.includes('tool')
 /** Energy type symbol a card provides, e.g. '{G}'. */
 export const energyType = (card: DeckCard): string => card.card?.type ?? ''
 
-/** Retreat cost in Energy, after any Tool that reduces it. */
-export function retreatCost(slot: InPlay): number {
+const SKYLINER = norm('Latias ex')
+
+/**
+ * Retreat cost in Energy, after everything that reduces it.
+ *
+ * Latias ex's Skyliner ("Your Basic Pokemon in play have no Retreat Cost") is a
+ * passive, so it is read when retreat is priced rather than used as an action.
+ * Only Basics are ever in play on turn 1, so with Latias ex out every retreat
+ * this turn is free — which is often the whole reason a deck can reach the
+ * Active it wants.
+ */
+export function retreatCost(state: SimState, slot: InPlay): number {
+  if (isBasicPokemon(slot.card) && allInPlay(state).some((s) => norm(cardName(s.card)) === SKYLINER)) {
+    return 0
+  }
   const base = slot.card.card?.retreat ?? 0
   // Air Balloon is the only retreat reducer in the current pool.
   const reduction = slot.tools.some((t) => norm(cardName(t)) === norm('Air Balloon')) ? 2 : 0
@@ -93,11 +111,16 @@ export function retreatCost(slot: InPlay): number {
 /** The goal layer's view of this state. */
 export const toBoardView = (state: SimState): BoardView => ({
   active: state.active
-    ? { cardKey: state.active.card.key, energy: state.active.energy.map(energyType) }
+    ? {
+        cardKey: state.active.card.key,
+        energy: state.active.energy.map(energyType),
+        tools: state.active.tools.map((tool) => tool.key),
+      }
     : null,
   bench: state.bench.map((slot) => ({
     cardKey: slot.card.key,
     energy: slot.energy.map(energyType),
+    tools: slot.tools.map((tool) => tool.key),
   })),
   stadiumKey: state.stadium?.key ?? null,
   hand: state.hand.map((card) => card.key),
@@ -123,6 +146,7 @@ export function cloneState(state: SimState): SimState {
     usedSupporter: state.usedSupporter,
     usedStadium: state.usedStadium,
     usedRetreat: state.usedRetreat,
+    usedAbilities: state.usedAbilities,
   }
 }
 
@@ -148,5 +172,6 @@ export function signature(state: SimState): string {
     state.deck.slice(0, 8).map((c) => c.key).join(','),
     state.deck.length,
     flags,
+    [...state.usedAbilities].sort().join(','),
   ].join('|')
 }

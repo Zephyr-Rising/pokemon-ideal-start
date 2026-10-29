@@ -180,6 +180,19 @@ registerEffect('Ultra Ball', (state, ctx) => {
   return found.length > 0 ? found.map((card) => fetchToHand(paid, card)) : [paid]
 })
 
+registerEffect('Fighting Gong', (state, ctx) => {
+  // "Search your deck for a Basic {F} Energy card or a Basic {F} Pokémon,
+  // reveal it, and put it into your hand."
+  //
+  // Both halves feed the same engine, which is why the choice is branched on
+  // rather than resolved: the Energy is what Lunatone's Lunar Cycle discards to
+  // draw 3, and the Pokémon can be the Solrock that switches Lunar Cycle on.
+  const fighting = (card: DeckCard) =>
+    (isBasicEnergy(card) || isBasicPokemon(card)) && energyType(card) === '{F}'
+  const found = choices(state.deck, fighting, ctx)
+  return found.length > 0 ? found.map((card) => fetchToHand(state, card)) : [state]
+})
+
 registerEffect('Poké Pad', (state, ctx) => {
   const found = choices(state.deck, (c) => isPokemon(c) && !hasRuleBox(c), ctx)
   return found.length > 0 ? found.map((card) => fetchToHand(state, card)) : [state]

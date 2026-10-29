@@ -15,3 +15,42 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+/* The turn-1 replay deals cards in as the line is played back. Only cards that
+   are new to a frame mount, so a plain mount animation is all that is needed -
+   the ones already on the table keep their DOM and stay put. */
+@layer components {
+  @keyframes deal-in {
+    from {
+      opacity: 0;
+      transform: translateY(-0.5rem) scale(0.92);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .animate-deal {
+    animation: deal-in 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  /* A step that is simply read, not dealt, still wants to announce itself. */
+  @keyframes step-in {
+    from {
+      opacity: 0;
+      transform: translateX(-0.35rem);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .animate-step {
+    animation: step-in 260ms ease-out both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .animate-deal,
+    .animate-step {
+      animation: none;
+    }
+  }
+}

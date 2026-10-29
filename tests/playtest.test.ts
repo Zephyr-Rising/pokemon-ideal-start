@@ -26,6 +26,7 @@ const slot = (id: string, cardKey: string, energy = 0): SlotGoal => ({
   cardKey,
   energy,
   energyType: null,
+  tools: [],
 })
 
 const goal = (over: Partial<FieldGoal> = {}): FieldGoal => ({ ...emptyGoal(), ...over })
@@ -130,9 +131,12 @@ describe('agreement with the exact Phase 1 engine', () => {
     ]
     const exact = analyze(cards, condition).firstLook!
 
-    // Within the simulation's own stated margin, plus a little slack for the
-    // margin being an estimate too.
-    expect(Math.abs(simulated.strict - exact)).toBeLessThan(simulated.margin + 0.02)
+    // The exact figure is a floor, not a match. Any opening holding an Ultra
+    // Ball reaches this goal, because the simulator can decline to play it —
+    // but a turn-1 draw Ability (Run Errand, Teal Dance) can also *find* one
+    // the opening 8 did not contain, which the Phase 1 engine does not model.
+    // So the simulation should sit at or above the opening-8 odds, never below.
+    expect(simulated.strict).toBeGreaterThan(exact - simulated.margin - 0.02)
   }, 30_000)
 
   it('matches the exact mulligan rate', () => {
@@ -160,16 +164,78 @@ describe('the simulator actually plays cards', () => {
   it('reports an example line of play, in readable steps', () => {
     const g = goal({ active: slot('a', keyOf(cards, 'Mega Kangaskhan ex')), benchMin: 2 })
     const result = playtest(cards, g, labelFor(cards), { trials: 200, seed: 61 })
+    const [example] = result.examples
 
-    expect(result.exampleSteps.length).toBeGreaterThan(0)
-    expect(result.exampleReached).toBe(true)
-    // Every step names a card and reads as an instruction, not an opcode.
-    expect(result.exampleSteps[0]).toMatch(/^Start with Mega Kangaskhan ex in the Active Spot$/)
-    for (const step of result.exampleSteps) expect(step).not.toMatch(/handIndex|undefined/)
+    expect(result.examples.length).toBeGreaterThan(0)
+    expect(example.reached).toBe(true)
+    // Every step names a card and reads as an instruction, not an opcode. The
+    // opening Pokemon is deliberately not pinned: with Teal Dance available the
+    // search may well start on Ogerpon and switch into Kangaskhan, which is a
+    // better line, and pinning one would be testing the move ordering instead.
+    expect(example.steps[0]).toMatch(/^Start with .+ in the Active Spot$/)
+    for (const step of example.steps) expect(step).not.toMatch(/handIndex|undefined/)
 
     // The board shown is the one the line ended on, not the one it started from.
-    expect(result.exampleBoard?.active?.label).toBe('Mega Kangaskhan ex')
-    expect(result.exampleBoard!.bench.length).toBeGreaterThanOrEqual(2)
+    expect(example.board?.active?.label).toBe('Mega Kangaskhan ex')
+    expect(example.board!.bench.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('snapshots the hand and board at every point in the line', () => {
+    const g = goal({ active: slot('a', keyOf(cards, 'Mega Kangaskhan ex')), benchMin: 2 })
+    const result = playtest(cards, g, labelFor(cards), { trials: 200, seed: 61 })
+    const [example] = result.examples
+    const { frames } = example
+
+    // The first frame is the deal itself, so there is one more frame than step
+    // and `frames[i + 1]` is the board after `steps[i]`.
+    expect(frames).toHaveLength(example.steps.length + 1)
+    expect(frames.slice(1).map((f) => f.step)).toEqual(example.steps)
+
+    // It opens on a full hand of 7 and an empty table.
+    expect(frames[0].hand).toHaveLength(7)
+    expect(frames[0].board.active).toBeNull()
+    expect(frames[0].board.bench).toHaveLength(0)
+
+    // The Active is placed from that hand, then the turn's draw replaces it, so
+    // the eighth card is visibly accounted for rather than appearing from
+    // nowhere.
+    expect(frames[1].board.active).not.toBeNull()
+    expect(frames[1].hand).toHaveLength(6)
+    expect(frames[2].step).toBe('Draw a card to start the turn')
+    expect(frames[2].hand).toHaveLength(7)
+
+    // Every frame carries enough to render a card: a key and a label.
+    for (const frame of frames) {
+      for (const card of frame.hand) {
+        expect(card.cardKey).toBeTruthy()
+        expect(card.label).toBeTruthy()
+      }
+    }
+
+    // The line ends on the board the panel reports.
+    const end = frames[frames.length - 1].board
+    expect(end.active?.label).toBe(example.board!.active?.label)
+    expect(end.bench).toHaveLength(example.board!.bench.length)
+  })
+
+  it('offers several genuinely different routes', () => {
+    const g = goal({ benchMin: 3 })
+    const result = playtest(cards, g, labelFor(cards), { trials: 400, seed: 63 })
+
+    expect(result.examples.length).toBeGreaterThan(1)
+    // Two lines making the same plays in a different order are the same route,
+    // so "another way" must never just be a reshuffle of the one before.
+    const canonical = result.examples.map((e) => [...e.steps].sort().join('|'))
+    expect(new Set(canonical).size).toBe(canonical.length)
+    expect(result.examples.every((e) => e.reached)).toBe(true)
+  })
+
+  it('falls back to the closest attempt when nothing succeeds', () => {
+    const impossible = goal({ bench: [slot('b', 'id:nope')] })
+    const result = playtest(cards, impossible, labelFor(cards), { trials: 50, seed: 65 })
+    expect(result.strict).toBe(0)
+    expect(result.examples).toHaveLength(1)
+    expect(result.examples[0].reached).toBe(false)
   })
 
   it('explains what a search card actually fetched', () => {
@@ -177,9 +243,9 @@ describe('the simulator actually plays cards', () => {
     // effect reports what it really did rather than repeating its card text.
     const g = goal({ benchMin: 5 })
     const result = playtest(cards, g, labelFor(cards), { trials: 400, seed: 71 })
-    const joined = result.exampleSteps.join(' | ')
-    expect(result.exampleSteps.length).toBeGreaterThan(0)
+    const joined = result.examples.flatMap((e) => e.steps).join(' | ')
+    expect(result.examples.length).toBeGreaterThan(0)
     // Reaching five benched needs a search card, and the step must say what it found.
     expect(joined).toMatch(/Play .+ — (benching|taking|drawing)/)
-  })
+  }, 30_000)
 })

@@ -1,0 +1,296 @@
+import { describe, expect, it } from 'vitest'
+
+import {
+  abilityAvailable,
+  abilityOf,
+  onBenchPlay,
+  useAbility,
+} from '../src/lib/sim/abilities'
+import { applyAction } from '../src/lib/sim/actions'
+import { describeStep } from '../src/lib/sim/describe'
+import { lookupEffect, type EffectContext } from '../src/lib/sim/effects'
+import { ACTIVE_TARGET, inPlay, retreatCost, type SimState } from '../src/lib/sim/state'
+import type { CardRecord, DeckCard } from '../src/lib/types'
+
+function card(key: string, tags: string[], over: Partial<CardRecord> = {}): DeckCard {
+  const record: CardRecord = {
+    index: 0,
+    name: key,
+    kind: '',
+    rule: '',
+    prev: '',
+    hp: null,
+    type: '',
+    retreat: null,
+    regulationMark: '',
+    effect: '',
+    moves: [],
+    tags,
+    image: '',
+    ...over,
+  }
+  return { key, label: key, resolvedName: over.name ?? key, count: 1, card: record, printings: [], tags }
+}
+
+/** A Pokémon whose canonical name drives the Ability lookup. */
+const mon = (name: string, over: Partial<CardRecord> = {}) =>
+  card(name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), ['pokemon', 'basic'], { name, ...over })
+
+const energy = (type: string) =>
+  card(`energy${type}`, ['energy', 'basic-energy'], { type, name: `${type} Energy` })
+
+const supporter = (name: string) =>
+  card(name.toLowerCase().replace(/\s+/g, '-'), ['supporter'], { name })
+
+const state = (over: Partial<SimState> = {}): SimState => ({
+  hand: [],
+  deck: [],
+  discard: [],
+  prizes: [],
+  active: null,
+  bench: [],
+  stadium: null,
+  usedEnergy: false,
+  usedSupporter: false,
+  usedStadium: false,
+  usedRetreat: false,
+  usedAbilities: [],
+  ...over,
+})
+
+function ctx(over: Partial<EffectContext> = {}): EffectContext {
+  return {
+    relevant: new Set<string>(),
+    wantsAnyBench: true,
+    wantsEnergy: true,
+    energyTypes: new Set<string>(),
+    energyTargets: new Set<string>(),
+    activeKey: null,
+    rng: () => 0.5,
+    seed: 1,
+    ...over,
+  }
+}
+
+const deckOf = (n: number) => Array.from({ length: n }, (_, i) => card(`filler${i}`, ['item']))
+
+describe('Run Errand (Mega Kangaskhan ex)', () => {
+  const kang = mon('Mega Kangaskhan ex')
+
+  it('draws 2 from the Active Spot', () => {
+    const s = state({ active: inPlay(kang), deck: deckOf(5) })
+    expect(abilityAvailable(s, ACTIVE_TARGET)).toBe(true)
+    const [after] = useAbility(s, ACTIVE_TARGET, ctx())
+    expect(after.hand).toHaveLength(2)
+    expect(after.deck).toHaveLength(3)
+  })
+
+  it('does nothing from the bench', () => {
+    const s = state({ active: inPlay(mon('Other')), bench: [inPlay(kang)], deck: deckOf(5) })
+    expect(abilityAvailable(s, 0)).toBe(false)
+  })
+
+  it('is capped across copies, not per Pokémon', () => {
+    // "You can't use more than 1 Run Errand Ability each turn" — a second copy
+    // on the bench does not get its own use.
+    const s = state({ active: inPlay(kang), bench: [inPlay(kang)], deck: deckOf(6) })
+    const [after] = useAbility(s, ACTIVE_TARGET, ctx())
+    expect(abilityAvailable(after, ACTIVE_TARGET)).toBe(false)
+    expect(after.usedAbilities).toContain('mega kangaskhan ex')
+  })
+
+  it('draws fewer rather than failing on a near-empty deck', () => {
+    const s = state({ active: inPlay(kang), deck: deckOf(1) })
+    const [after] = useAbility(s, ACTIVE_TARGET, ctx())
+    expect(after.hand).toHaveLength(1)
+    expect(after.deck).toHaveLength(0)
+  })
+})
+
+describe('Lunar Cycle (Lunatone)', () => {
+  // Both halves of the pair are {F}: Lunatone discards a Basic {F} Energy, and
+  // Solrock only has to be in play.
+  const lunatone = mon('Lunatone', { type: '{F}' })
+  const solrock = mon('Solrock', { type: '{F}' })
+
+  it('needs Solrock in play', () => {
+    const without = state({ active: inPlay(lunatone), hand: [energy('{F}')], deck: deckOf(5) })
+    expect(abilityAvailable(without, ACTIVE_TARGET)).toBe(false)
+
+    const withIt = state({
+      active: inPlay(lunatone),
+      bench: [inPlay(solrock)],
+      hand: [energy('{F}')],
+      deck: deckOf(5),
+    })
+    expect(abilityAvailable(withIt, ACTIVE_TARGET)).toBe(true)
+  })
+
+  it('needs a Basic {F} Energy in hand, not just any Energy', () => {
+    const s = state({
+      active: inPlay(lunatone),
+      bench: [inPlay(solrock)],
+      hand: [energy('{P}')],
+      deck: deckOf(5),
+    })
+    expect(abilityAvailable(s, ACTIVE_TARGET)).toBe(false)
+  })
+
+  it('discards the Energy and draws 3', () => {
+    const s = state({
+      active: inPlay(lunatone),
+      bench: [inPlay(solrock)],
+      hand: [energy('{F}')],
+      deck: deckOf(5),
+    })
+    const [after] = useAbility(s, ACTIVE_TARGET, ctx())
+    expect(after.discard).toHaveLength(1)
+    expect(after.hand).toHaveLength(3)
+    expect(after.deck).toHaveLength(2)
+  })
+
+  it('gives Solrock no Ability of its own', () => {
+    // The real card has only the Cosmic Beam attack. Its whole turn-1 job is
+    // being on the board to switch Lunar Cycle on.
+    expect(abilityOf(solrock)).toBeUndefined()
+  })
+})
+
+describe('Teal Dance (Teal Mask Ogerpon ex)', () => {
+  const ogerpon = mon('Teal Mask Ogerpon ex', { type: '{G}' })
+
+  it('attaches a Grass Energy and draws, without using the turn attachment', () => {
+    const s = state({ active: inPlay(ogerpon), hand: [energy('{G}')], deck: deckOf(3) })
+    const [after] = useAbility(s, ACTIVE_TARGET, ctx())
+    expect(after.active!.energy).toHaveLength(1)
+    expect(after.hand).toHaveLength(1)
+    // The manual attachment for the turn is still available.
+    expect(after.usedEnergy).toBe(false)
+  })
+
+  it('needs a Grass Energy specifically', () => {
+    const s = state({ active: inPlay(ogerpon), hand: [energy('{R}')], deck: deckOf(3) })
+    expect(abilityAvailable(s, ACTIVE_TARGET)).toBe(false)
+  })
+})
+
+describe('Abilities that fire when a Pokémon is benched', () => {
+  it("Meowth ex's Last-Ditch Catch fetches a Supporter, and declining is offered too", () => {
+    const meowth = mon('Meowth ex')
+    const cyrano = supporter('Cyrano')
+    const s = state({
+      active: inPlay(mon('Other')),
+      bench: [inPlay(meowth)],
+      deck: [cyrano, ...deckOf(3)],
+    })
+    const boards = onBenchPlay(s, 0, ctx())
+    // One board per Supporter it could take, plus the one where it declined.
+    expect(boards).toHaveLength(2)
+    expect(boards[0].hand.map((c) => c.key)).toContain('cyrano')
+    expect(boards[1].hand).toHaveLength(0)
+  })
+
+  it("Iron Leaves ex's Rapid Vernier switches itself to the Active Spot", () => {
+    const iron = mon('Iron Leaves ex')
+    const other = mon('Other')
+    const s = state({ active: inPlay(other), bench: [inPlay(iron)] })
+    const boards = onBenchPlay(s, 0, ctx())
+    expect(boards[0].active!.card.key).toBe(iron.key)
+    expect(boards[0].bench[0].card.key).toBe(other.key)
+    // Declining leaves the board as it was.
+    expect(boards[1].active!.card.key).toBe(other.key)
+  })
+
+  it('is not offered as an at-will action', () => {
+    const s = state({ active: inPlay(mon('Other')), bench: [inPlay(mon('Meowth ex'))] })
+    expect(abilityAvailable(s, 0)).toBe(false)
+  })
+})
+
+describe("Subjugating Chains (Pecharunt ex)", () => {
+  const pecharunt = mon('Pecharunt ex', { type: '{D}' })
+
+  it('switches in a benched Dark Pokémon, but never another Pecharunt ex', () => {
+    const dark = mon('Darkrai', { type: '{D}' })
+    const s = state({
+      active: inPlay(pecharunt),
+      bench: [inPlay(pecharunt), inPlay(dark)],
+    })
+    const boards = useAbility(s, ACTIVE_TARGET, ctx())
+    expect(boards).toHaveLength(1)
+    expect(boards[0].active!.card.key).toBe(dark.key)
+  })
+
+  it('is unusable with no Dark Pokémon to switch to', () => {
+    const s = state({ active: inPlay(pecharunt), bench: [inPlay(mon('Grass', { type: '{G}' }))] })
+    expect(abilityAvailable(s, ACTIVE_TARGET)).toBe(false)
+  })
+})
+
+describe('Skyliner (Latias ex)', () => {
+  it('makes every Basic retreat free while it is in play', () => {
+    const heavy = inPlay(mon('Heavy', { retreat: 3 }))
+    const without = state({ active: heavy, bench: [inPlay(mon('Light'))] })
+    expect(retreatCost(without, heavy)).toBe(3)
+
+    const withLatias = state({
+      active: heavy,
+      bench: [inPlay(mon('Latias ex', { type: '{C}' }))],
+    })
+    expect(retreatCost(withLatias, heavy)).toBe(0)
+  })
+})
+
+describe('Fighting Gong', () => {
+  const gong = card('fighting-gong', ['item'], { name: 'Fighting Gong' })
+
+  it('can take either a Basic {F} Energy or a Basic {F} Pokémon', () => {
+    // Both halves feed the same engine, so the choice has to be branched on
+    // rather than resolved: the Energy is what Lunar Cycle discards, and the
+    // Pokémon can be the Solrock that switches Lunar Cycle on.
+    const fightingEnergy = energy('{F}')
+    const solrock = mon('Solrock', { type: '{F}' })
+    const s = state({ hand: [gong], deck: [fightingEnergy, solrock, ...deckOf(2)] })
+
+    // Called directly, so the Gong is still in hand - the action layer is what
+    // discards a played Item. What matters is what each branch fetched.
+    const boards = lookupEffect(gong)!(s, ctx())
+    const fetched = boards.flatMap((b) => b.hand.map((c) => c.key)).filter((k) => k !== gong.key)
+    expect(fetched).toContain(fightingEnergy.key)
+    expect(fetched).toContain(solrock.key)
+  })
+
+  it('ignores Energy and Pokémon of other types', () => {
+    const s = state({
+      hand: [gong],
+      deck: [energy('{P}'), mon('Grass Mon', { type: '{G}' }), ...deckOf(2)],
+    })
+    const boards = lookupEffect(gong)!(s, ctx())
+    // Nothing eligible, so the one outcome is the unchanged board.
+    expect(boards).toHaveLength(1)
+    expect(boards[0].hand.map((c) => c.key)).toEqual([gong.key])
+  })
+})
+
+describe('describing a bench play', () => {
+  const bench = { kind: 'bench' as const, handIndex: 0 }
+
+  it('reports a switch only when the Active actually changes', () => {
+    const iron = mon('Iron Leaves ex')
+    const other = mon('Other')
+    const s = state({ hand: [iron], active: inPlay(other) })
+    const [switched] = applyAction(s, bench, ctx())
+    expect(describeStep(s, switched, bench)).toContain('switching it to the Active Spot')
+  })
+
+  it('does not claim a switch when a second copy of the Active is benched', () => {
+    // Copies share a card key, so a naive "is the arriving card now Active?"
+    // test reads benching a duplicate as a switch. Nothing moved.
+    const kang = mon('Mega Kangaskhan ex')
+    const s = state({ hand: [kang], active: inPlay(kang) })
+    const [after] = applyAction(s, bench, ctx())
+    const step = describeStep(s, after, bench)
+    expect(step).not.toContain('switching')
+    expect(step).toBe(`Bench ${kang.label}`)
+  })
+})

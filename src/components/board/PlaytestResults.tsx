@@ -1,30 +1,21 @@
+import { useState } from 'react'
+
 import { goalIsEmpty, type FieldGoal } from '../../lib/board/goal'
 import { pct, plural } from '../../lib/format'
-import type { ExampleSlot } from '../../lib/sim/playtest'
+import type { PlaytestExample } from '../../lib/sim/playtest'
+import type { DeckCard } from '../../lib/types'
 import type { PlaytestState } from '../../lib/use-playtest'
-
-/** "Dreepy (2 Energy)" — Energy only mentioned when there is some. */
-const describeSlot = (slot: ExampleSlot): string =>
-  slot.energy.length > 0
-    ? `${slot.label} (${slot.energy.length} Energy)`
-    : slot.label
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex gap-2">
-      <dt className="w-16 shrink-0 text-xs text-slate-500">{label}</dt>
-      <dd className="grow">{children}</dd>
-    </div>
-  )
-}
+import { ReplayPlayer } from './ReplayPlayer'
 
 interface Props {
   goal: FieldGoal
   state: PlaytestState
   trials: number
+  /** The resolved deck, for the card images the replay shows. */
+  cards: DeckCard[]
 }
 
-export function PlaytestResults({ goal, state, trials }: Props) {
+export function PlaytestResults({ goal, state, trials, cards }: Props) {
   if (goalIsEmpty(goal)) {
     return (
       <section className="space-y-3">
@@ -126,57 +117,13 @@ export function PlaytestResults({ goal, state, trials }: Props) {
             </div>
           )}
 
-          {result.exampleSteps.length > 0 && (
-            <div
-              data-testid="example-line"
-              className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"
-            >
-              <h3 className="text-sm font-semibold">
-                {result.exampleReached ? 'How it gets there' : 'The closest it came'}
-              </h3>
-              <p className="mt-0.5 mb-3 text-xs text-slate-500">
-                {result.exampleReached
-                  ? 'One real game, played out in full — the opening placement first, then every play in order.'
-                  : 'No game reached the whole board. This is the best any of them managed.'}
-              </p>
-
-              <ol className="space-y-1.5 text-sm">
-                {result.exampleSteps.map((step, index) => (
-                  <li key={`${index}-${step}`} className="flex gap-2">
-                    <span className="tnum w-5 shrink-0 text-right text-xs text-slate-400">
-                      {index + 1}.
-                    </span>
-                    <span>{step}</span>
-                  </li>
-                ))}
-              </ol>
-
-              {result.exampleBoard && (
-                <div className="mt-4 border-t border-slate-100 pt-3 dark:border-slate-800">
-                  <h4 className="mb-2 text-xs font-semibold tracking-wide text-slate-500 uppercase">
-                    Board it ended on
-                  </h4>
-                  <dl className="space-y-1 text-sm">
-                    <Row label="Active">
-                      {result.exampleBoard.active
-                        ? describeSlot(result.exampleBoard.active)
-                        : 'nothing'}
-                    </Row>
-                    <Row label="Bench">
-                      {result.exampleBoard.bench.length > 0
-                        ? result.exampleBoard.bench.map(describeSlot).join(' · ')
-                        : 'empty'}
-                    </Row>
-                    {result.exampleBoard.stadium && (
-                      <Row label="Stadium">{result.exampleBoard.stadium}</Row>
-                    )}
-                    <Row label="In hand">
-                      {plural(result.exampleBoard.handCount, 'card')}
-                    </Row>
-                  </dl>
-                </div>
-              )}
-            </div>
+          {result.examples.length > 0 && (
+            <Routes
+              // Remount on a fresh run so the shown route resets to the first.
+              key={`${result.trials}-${result.examples.length}-${result.examples[0].steps[0] ?? ''}`}
+              examples={result.examples}
+              cards={cards}
+            />
           )}
 
           {(result.ignored.length > 0 || result.truncated > 0) && (
@@ -209,5 +156,65 @@ export function PlaytestResults({ goal, state, trials }: Props) {
         </>
       )}
     </section>
+  )
+}
+
+/**
+ * The routes a deck took to the board, one at a time.
+ *
+ * A run collects several *distinct* successful lines — two that make the same
+ * plays in a different order count as one — so stepping through them shows
+ * genuinely different ways there rather than the same way reshuffled.
+ */
+function Routes({ examples, cards }: { examples: PlaytestExample[]; cards: DeckCard[] }) {
+  const [index, setIndex] = useState(0)
+  const example = examples[Math.min(index, examples.length - 1)]
+  const more = examples.length > 1
+
+  return (
+    <div
+      data-testid="example-line"
+      className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold">
+          {example.reached ? 'How it gets there' : 'The closest it came'}
+        </h3>
+        {more && (
+          <div className="flex items-center gap-2">
+            <span className="tnum text-xs text-slate-500">
+              route {Math.min(index, examples.length - 1) + 1} of {examples.length}
+            </span>
+            <button
+              type="button"
+              onClick={() => setIndex((n) => (n + 1) % examples.length)}
+              className="rounded-md border border-slate-300 px-2.5 py-1 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+            >
+              Another way
+            </button>
+          </div>
+        )}
+      </div>
+
+      <p className="mt-0.5 mb-3 text-xs text-slate-500">
+        {example.reached
+          ? 'One real game, played out in full — the deal first, then every play in order.'
+          : 'No game reached the whole board. This is the best any of them managed.'}
+      </p>
+
+      <ol className="space-y-1.5 text-sm">
+        {example.steps.map((step, position) => (
+          <li key={`${position}-${step}`} className="flex gap-2">
+            <span className="tnum w-5 shrink-0 text-right text-xs text-slate-400">
+              {position + 1}.
+            </span>
+            <span>{step}</span>
+          </li>
+        ))}
+      </ol>
+
+      {/* Keyed on the route, so picking another way rewinds to its first move. */}
+      <ReplayPlayer key={index} frames={example.frames} cards={cards} />
+    </div>
   )
 }

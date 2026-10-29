@@ -45,6 +45,7 @@ const state = (over: Partial<SimState> = {}): SimState => ({
   usedSupporter: false,
   usedStadium: false,
   usedRetreat: false,
+  usedAbilities: [],
   ...over,
 })
 
@@ -53,6 +54,7 @@ const slot = (id: string, cardKey: string, energyCount = 0): SlotGoal => ({
   cardKey,
   energy: energyCount,
   energyType: null,
+  tools: [],
 })
 
 const goal = (over: Partial<FieldGoal> = {}): FieldGoal => ({ ...emptyGoal(), ...over })

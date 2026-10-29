@@ -158,7 +158,12 @@ export default function App() {
             ) : (
               <div role="tabpanel" className="space-y-10">
                 <BoardEditor cards={deck.cards} goal={goal} onChange={setGoal} />
-                <PlaytestResults goal={goal} state={playtest} trials={trials} />
+                <PlaytestResults
+                  goal={goal}
+                  state={playtest}
+                  trials={trials}
+                  cards={deck.cards}
+                />
                 <label className="flex items-center gap-2 text-xs text-slate-500">
                   Games played:
                   <select

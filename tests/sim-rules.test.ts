@@ -59,6 +59,7 @@ const state = (over: Partial<SimState> = {}): SimState => ({
   usedSupporter: false,
   usedStadium: false,
   usedRetreat: false,
+  usedAbilities: [],
   ...over,
 })
 
@@ -201,8 +202,8 @@ describe('retreat', () => {
   it('is free when a Tool cancels the cost', () => {
     const active = inPlay(basic('heavy', 2))
     active.tools = [card('balloon', ['tool'], { name: 'Air Balloon' })]
-    expect(retreatCost(active)).toBe(0)
     const s = state({ active, bench: [inPlay(basic('light'))] })
+    expect(retreatCost(s, active)).toBe(0)
     expect(kinds(s)).toContain('retreat')
   })
 })
@@ -320,8 +321,8 @@ describe('draw and board view', () => {
     active.energy = [energy('e', '{P}')]
     const s = state({ active, bench: [inPlay(basic('budew'))], hand: [item('x')] })
     expect(toBoardView(s)).toEqual({
-      active: { cardKey: 'dreepy', energy: ['{P}'] },
-      bench: [{ cardKey: 'budew', energy: [] }],
+      active: { cardKey: 'dreepy', energy: ['{P}'], tools: [] },
+      bench: [{ cardKey: 'budew', energy: [], tools: [] }],
       stadiumKey: null,
       hand: ['x'],
     })

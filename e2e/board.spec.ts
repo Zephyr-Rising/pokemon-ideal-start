@@ -90,3 +90,73 @@ test('keeps the opening-hand tab working alongside it', async ({ page }) => {
   await expect(page.getByTestId('headline-probability')).toBeVisible()
   await expect(page.getByText('no simulation, no sampling error')).toBeVisible()
 })
+
+test('replays the line a move at a time, from the opening hand', async ({ page }) => {
+  const consoleErrors: string[] = []
+  page.on('pageerror', (error) => consoleErrors.push(error.message))
+
+  await openBoard(page)
+  await page.getByRole('button', { name: 'Pick Mega Kangaskhan ex' }).click()
+  await page.getByRole('button', { name: 'Place in Active spot' }).click()
+  await page.getByLabel('Minimum benched Pokémon').fill('2')
+
+  const replay = page.getByTestId('replay')
+  await expect(replay).toBeVisible({ timeout: 60_000 })
+
+  // It opens on the deal: a full hand of seven, nothing on the table yet.
+  await expect(replay.getByText('Draw your opening hand')).toBeVisible()
+  await expect(replay.getByText('Hand (7)')).toBeVisible()
+  await expect(replay.getByText('Bench (0)')).toBeVisible()
+
+  const scrubber = replay.getByRole('slider')
+  await expect(scrubber).toHaveValue('0')
+  const steps = Number(await scrubber.getAttribute('max'))
+  expect(steps).toBeGreaterThan(0)
+
+  // Stepping forward places the Active out of that hand.
+  await replay.getByRole('button', { name: 'Next move' }).click()
+  await expect(replay.getByText(/^Start with .+ in the Active Spot$/)).toBeVisible()
+  await expect(replay.getByText('Hand (6)')).toBeVisible()
+
+  // Back at the start the controls bound correctly rather than running off.
+  await replay.getByRole('button', { name: 'Previous move' }).click()
+  await expect(scrubber).toHaveValue('0')
+  await expect(replay.getByRole('button', { name: 'Previous move' })).toBeDisabled()
+
+  // Scrubbing to the end disables forward travel and offers a replay.
+  await scrubber.fill(String(steps))
+  await expect(replay.getByRole('button', { name: 'Next move' })).toBeDisabled()
+  await expect(replay.getByRole('button', { name: 'Replay' })).toBeVisible()
+
+  // Playing from the end rewinds first, rather than sitting still.
+  await replay.getByRole('button', { name: 'Replay' }).click()
+  await expect(scrubber).not.toHaveValue(String(steps))
+
+  expect(consoleErrors).toEqual([])
+})
+
+test('shows a different route on request, rewound to its first move', async ({ page }) => {
+  await openBoard(page)
+  await page.getByRole('button', { name: 'Pick Mega Kangaskhan ex' }).click()
+  await page.getByRole('button', { name: 'Place in Active spot' }).click()
+  await page.getByLabel('Minimum benched Pokémon').fill('2')
+
+  const line = page.getByTestId('example-line')
+  await expect(line).toBeVisible({ timeout: 60_000 })
+
+  const another = line.getByRole('button', { name: 'Another way' })
+  // A deck this open reaches the board several ways, so the control should be
+  // there; if a run genuinely found only one, there is nothing to switch to.
+  if (!(await another.isVisible())) return
+
+  const first = await line.locator('ol li').allInnerTexts()
+  const scrubber = line.getByRole('slider')
+  await scrubber.fill(await scrubber.getAttribute('max') ?? '0')
+  await expect(scrubber).not.toHaveValue('0')
+
+  await another.click()
+  await expect(line.getByText(/route 2 of \d+/)).toBeVisible()
+  // The new route starts from its own opening hand, not the old playhead.
+  await expect(scrubber).toHaveValue('0')
+  expect(await line.locator('ol li').allInnerTexts()).not.toEqual(first)
+})

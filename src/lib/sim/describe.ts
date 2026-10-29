@@ -1,6 +1,7 @@
 import type { DeckCard } from '../types'
-import { ACTIVE_TARGET, type Action } from './actions'
-import { cardName, energyType, type SimState } from './state'
+import { abilityOf } from './abilities'
+import type { Action } from './actions'
+import { ACTIVE_TARGET, cardName, energyType, type SimState } from './state'
 
 /**
  * Turn a play into a line of readable text.
@@ -75,8 +76,38 @@ export function describeStep(before: SimState, after: SimState, action: Action):
     case 'placeActive':
       return `Start with ${label(after.active!.card)} in the Active Spot`
 
-    case 'bench':
-      return `Bench ${benched[0] ?? 'a Pokémon'}`
+    case 'bench': {
+      // Named from the card that left the hand, not from the bench diff: an
+      // Ability that fires on arrival may have moved it straight to the Active.
+      const card = before.hand[action.handIndex]
+      const extras: string[] = []
+      if (drawn.length > 0) extras.push(`taking ${list(drawn)}`)
+      // Compare which card is Active either side of the play, not whether the
+      // arriving one matches: copies share a key, so benching a second copy of
+      // whatever is already Active would otherwise read as a switch. When both
+      // are the same card the swap is unobservable anyway, so saying nothing is
+      // the honest description.
+      if (before.active?.card.key !== after.active?.card.key) {
+        extras.push('switching it to the Active Spot')
+      }
+      return extras.length > 0
+        ? `Bench ${label(card)} — ${extras.join(', ')}`
+        : `Bench ${label(card)}`
+    }
+
+    case 'useAbility': {
+      const slot = action.target === ACTIVE_TARGET ? before.active! : before.bench[action.target]
+      const def = abilityOf(slot.card)
+      const outcome: string[] = []
+      if (drawn.length > 0) outcome.push(`taking ${list(drawn)}`)
+      const energyTargets = energised(before, after)
+      if (energyTargets.length > 0) outcome.push(`attaching to ${list(energyTargets)}`)
+      if (before.active?.card.key !== after.active?.card.key) {
+        outcome.push(`switching ${label(after.active!.card)} in`)
+      }
+      const used = `Use ${label(slot.card)}'s ${def?.ability ?? 'Ability'}`
+      return outcome.length > 0 ? `${used} — ${outcome.join(', ')}` : used
+    }
 
     case 'attachEnergy': {
       const card = before.hand[action.handIndex]

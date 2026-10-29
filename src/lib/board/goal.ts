@@ -11,6 +11,8 @@ export interface BoardPokemon {
   cardKey: string
   /** Energy type symbols attached, e.g. ['{G}', '{G}']. */
   energy: string[]
+  /** Card keys of Tools attached. */
+  tools: string[]
 }
 
 /** A board at the end of turn 1 — whatever produced it. */
@@ -30,6 +32,8 @@ export interface SlotGoal {
   energy: number
   /** Required Energy type, or null for any type. */
   energyType: string | null
+  /** Tools that must be attached to this Pokémon. */
+  tools: string[]
 }
 
 export interface HandGoal {
@@ -55,7 +59,16 @@ export const emptyGoal = (): FieldGoal => ({
   inHand: [],
 })
 
-export type PartKind = 'active' | 'activeEnergy' | 'bench' | 'benchEnergy' | 'benchMin' | 'stadium' | 'hand'
+export type PartKind =
+  | 'active'
+  | 'activeEnergy'
+  | 'activeTool'
+  | 'bench'
+  | 'benchEnergy'
+  | 'benchTool'
+  | 'benchMin'
+  | 'stadium'
+  | 'hand'
 
 /** One scorable piece of the goal. Both scores are built from these. */
 export interface GoalPart {
@@ -79,6 +92,10 @@ export const goalIsEmpty = (goal: FieldGoal): boolean =>
   goal.benchMin === 0 &&
   goal.stadiumKey === null &&
   goal.inHand.length === 0
+
+/** Is this Tool attached to the Pokémon the slot was paired with? */
+const toolMet = (pokemon: BoardPokemon | undefined, toolKey: string): boolean =>
+  pokemon !== undefined && pokemon.tools.includes(toolKey)
 
 /** Does this Pokémon carry the Energy a slot asks for? */
 function energyMet(pokemon: BoardPokemon | undefined, slot: SlotGoal): boolean {
@@ -107,10 +124,14 @@ function pairBench(goals: SlotGoal[], bench: BoardPokemon[]): Map<string, BoardP
     if (list) list.push(pokemon)
     else available.set(pokemon.cardKey, [pokemon])
   }
-  for (const list of available.values()) list.sort((a, b) => b.energy.length - a.energy.length)
+  // Best-equipped first, so the fussiest slot gets the Pokémon most likely to
+  // satisfy it.
+  for (const list of available.values()) {
+    list.sort((a, b) => b.energy.length + b.tools.length - (a.energy.length + a.tools.length))
+  }
 
   const paired = new Map<string, BoardPokemon | undefined>()
-  const byDemand = [...goals].sort((a, b) => b.energy - a.energy)
+  const byDemand = [...goals].sort((a, b) => b.energy + b.tools.length - (a.energy + a.tools.length))
   for (const goal of byDemand) {
     paired.set(goal.id, available.get(goal.cardKey)?.shift())
   }
@@ -147,6 +168,14 @@ export function scoreBoard(
         met: matches && energyMet(board.active ?? undefined, goal.active),
       })
     }
+    for (const toolKey of goal.active.tools) {
+      parts.push({
+        id: `${goal.active.id}:tool:${toolKey}`,
+        kind: 'activeTool',
+        label: `${labelFor(toolKey)} on ${labelFor(goal.active.cardKey)}`,
+        met: matches && toolMet(board.active ?? undefined, toolKey),
+      })
+    }
   }
 
   const paired = pairBench(goal.bench, board.bench)
@@ -164,6 +193,14 @@ export function scoreBoard(
         kind: 'benchEnergy',
         label: `${slot.energy} Energy on ${labelFor(slot.cardKey)}`,
         met: energyMet(pokemon, slot),
+      })
+    }
+    for (const toolKey of slot.tools) {
+      parts.push({
+        id: `${slot.id}:tool:${toolKey}`,
+        kind: 'benchTool',
+        label: `${labelFor(toolKey)} on ${labelFor(slot.cardKey)}`,
+        met: toolMet(pokemon, toolKey),
       })
     }
   }

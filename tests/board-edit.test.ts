@@ -12,6 +12,7 @@ import {
   setBenchMin,
   setSlotEnergy,
   setStadium,
+  slotTarget,
 } from '../src/lib/board/edit'
 import { emptyGoal, goalIsEmpty } from '../src/lib/board/goal'
 
@@ -82,21 +83,74 @@ describe('limits', () => {
 })
 
 describe('drops', () => {
+  const pokemon = (key: string) => ({
+    key,
+    isPokemon: true,
+    isStadium: false,
+    isEnergy: false,
+    isTool: false,
+    energyType: null,
+  })
+  const stadium = (key: string) => ({ ...pokemon(key), isPokemon: false, isStadium: true })
+  const energy = (key: string, energyType: string | null) => ({
+    ...pokemon(key),
+    isPokemon: false,
+    isEnergy: true,
+    energyType,
+  })
+  const tool = (key: string) => ({ ...pokemon(key), isPokemon: false, isTool: true })
+
   it('ignores a card that makes no sense in the zone', () => {
     // A Stadium is not a Pokémon, so it cannot take the Active Spot.
-    const goal = dropCard(emptyGoal(), 'active', 'arena', false, true)
-    expect(goal.active).toBeNull()
+    expect(dropCard(emptyGoal(), 'active', stadium('arena')).active).toBeNull()
     // ...and a Pokémon is not a Stadium.
-    expect(dropCard(emptyGoal(), 'stadium', 'dreepy', true, false).stadiumKey).toBeNull()
+    expect(dropCard(emptyGoal(), 'stadium', pokemon('dreepy')).stadiumKey).toBeNull()
   })
 
   it('accepts anything into the hand zone', () => {
     // Holding a card at end of turn has no type restriction.
-    expect(dropCard(emptyGoal(), 'hand', 'arena', false, true).inHand).toHaveLength(1)
+    expect(dropCard(emptyGoal(), 'hand', stadium('arena')).inHand).toHaveLength(1)
   })
 
   it('routes a Pokémon to the zone it was dropped in', () => {
-    expect(dropCard(emptyGoal(), 'active', 'dreepy', true, false).active?.cardKey).toBe('dreepy')
-    expect(dropCard(emptyGoal(), 'bench', 'dreepy', true, false).bench).toHaveLength(1)
+    expect(dropCard(emptyGoal(), 'active', pokemon('dreepy')).active?.cardKey).toBe('dreepy')
+    expect(dropCard(emptyGoal(), 'bench', pokemon('dreepy')).bench).toHaveLength(1)
+  })
+
+  it('attaches Energy to the Pokémon it was dropped on, pinning the type', () => {
+    const placed = placeActive(emptyGoal(), 'dreepy')
+    const target = slotTarget(placed.active!.id)
+    const once = dropCard(placed, target, energy('psychic', '{P}'))
+    expect(once.active?.energy).toBe(1)
+    expect(once.active?.energyType).toBe('{P}')
+
+    // A second of the same type asks for two of it.
+    const twice = dropCard(once, target, energy('psychic', '{P}'))
+    expect(twice.active?.energy).toBe(2)
+    expect(twice.active?.energyType).toBe('{P}')
+  })
+
+  it('falls back to "any type" when Energy of two types is dropped on one Pokémon', () => {
+    // One slot cannot express "one Grass and one Fire", so it stops pinning.
+    const placed = placeActive(emptyGoal(), 'dreepy')
+    const target = slotTarget(placed.active!.id)
+    const mixed = dropCard(dropCard(placed, target, energy('g', '{G}')), target, energy('r', '{R}'))
+    expect(mixed.active?.energy).toBe(2)
+    expect(mixed.active?.energyType).toBeNull()
+  })
+
+  it('attaches a Tool to the Pokémon it was dropped on, once', () => {
+    const placed = addBench(emptyGoal(), 'dreepy')
+    const target = slotTarget(placed.bench[0].id)
+    const once = dropCard(placed, target, tool('belt'))
+    expect(once.bench[0].tools).toEqual(['belt'])
+    // The same Tool twice is still one Tool.
+    expect(dropCard(once, target, tool('belt')).bench[0].tools).toEqual(['belt'])
+  })
+
+  it('ignores a Pokémon dropped onto another Pokémon', () => {
+    const placed = placeActive(emptyGoal(), 'dreepy')
+    const target = slotTarget(placed.active!.id)
+    expect(dropCard(placed, target, pokemon('budew'))).toEqual(placed)
   })
 })

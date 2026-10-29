@@ -11,6 +11,14 @@ export interface SearchResult {
   line: Action[]
   /** The same plays, as readable text. */
   steps: string[]
+  /**
+   * The board after each play, parallel to `steps`.
+   *
+   * Kept so the UI can replay the line a move at a time. These are references
+   * to states the search already allocated, so the chain costs one pointer per
+   * step rather than a copy.
+   */
+  frames: SimState[]
   /** The board those plays ended on. */
   finalState: SimState
   /** States expanded. */
@@ -58,11 +66,17 @@ export function searchBestLine(
   let best = scoreBoard(goal, toBoardView(start), labelFor)
   let bestLine: Action[] = []
   let bestSteps: string[] = []
+  let bestFrames: SimState[] = []
   let bestState = start
   let nodes = 0
   let exhausted = true
 
-  const visit = (state: SimState, line: Action[], steps: string[]): void => {
+  const visit = (
+    state: SimState,
+    line: Action[],
+    steps: string[],
+    frames: SimState[],
+  ): void => {
     if (best.strict) return
     if (nodes >= maxNodes) {
       exhausted = false
@@ -79,6 +93,7 @@ export function searchBestLine(
       best = score
       bestLine = line
       bestSteps = steps
+      bestFrames = frames
       bestState = state
     }
     // Nothing further can improve on a board that already meets the goal.
@@ -88,12 +103,25 @@ export function searchBestLine(
       // Ending the turn adds no board; this state has already been scored.
       if (action.kind === 'end') continue
       for (const next of applyAction(state, action, ctx)) {
-        visit(next, [...line, action], [...steps, describeStep(state, next, action)])
+        visit(
+          next,
+          [...line, action],
+          [...steps, describeStep(state, next, action)],
+          [...frames, next],
+        )
         if (best.strict) return
       }
     }
   }
 
-  visit(start, [], [])
-  return { score: best, line: bestLine, steps: bestSteps, finalState: bestState, nodes, exhausted }
+  visit(start, [], [], [])
+  return {
+    score: best,
+    line: bestLine,
+    steps: bestSteps,
+    frames: bestFrames,
+    finalState: bestState,
+    nodes,
+    exhausted,
+  }
 }

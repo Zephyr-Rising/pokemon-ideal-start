@@ -39,12 +39,41 @@ export interface PlaytestResult {
   ignored: string[]
   /** Trials where the node budget stopped the search early. */
   truncated: number
-  /** The best trial's line of play, as readable text. */
-  exampleSteps: string[]
-  /** The board that line ended on, trimmed to what the UI shows. */
-  exampleBoard: ExampleBoard | null
-  /** Whether that example actually reached the whole goal. */
-  exampleReached: boolean
+  /**
+   * Several distinct routes to the board, so you can see more than one way the
+   * deck gets there. Successful ones only, unless nothing ever succeeded — then
+   * it holds the single closest attempt.
+   */
+  examples: PlaytestExample[]
+}
+
+export interface PlaytestExample {
+  /** The line of play, as readable text. Parallel to `frames` after the first. */
+  steps: string[]
+  /**
+   * The hand and board at every point in the line, for replaying it a move at
+   * a time. `frames[0]` is the opening hand before anything is played, so
+   * `frames[i + 1]` is the board after `steps[i]`.
+   */
+  frames: ExampleFrame[]
+  /** The board it ended on, trimmed to what the UI shows. */
+  board: ExampleBoard | null
+  /** Whether it reached the whole goal. */
+  reached: boolean
+}
+
+/** One moment in the line: what was just done, and the resulting table. */
+export interface ExampleFrame {
+  /** The play that produced this board; the first frame is the deal itself. */
+  step: string
+  board: ExampleBoard
+  /** The cards held at this point, in hand order. */
+  hand: ExampleCard[]
+}
+
+export interface ExampleCard {
+  cardKey: string
+  label: string
 }
 
 /** A board, reduced to what the results panel renders. */
@@ -63,6 +92,8 @@ export interface ExampleSlot {
 }
 
 const DEFAULT_TRIALS = 1_500
+/** Enough different routes to be interesting, few enough to stay quick. */
+const MAX_EXAMPLES = 6
 
 /** One entry per physical copy — the deck as it is actually shuffled. */
 function physicalDeck(cards: DeckCard[]): DeckCard[] {
@@ -115,9 +146,7 @@ export function playtest(
     mulliganRate: 0,
     ignored,
     truncated: 0,
-    exampleSteps: [],
-    exampleBoard: null,
-    exampleReached: false,
+    examples: [],
   }
   if (deck.length < 13 || !deck.some(isBasicPokemon)) return blank
   // An empty goal is met by every board; running trials would say nothing.
@@ -130,10 +159,12 @@ export function playtest(
   let truncated = 0
   const partHits = new Map<string, { label: string; hits: number }>()
 
-  let bestCloseness = -1
-  let exampleSteps: string[] = []
-  let exampleBoard: ExampleBoard | null = null
-  let exampleReached = false
+  // Distinct successful routes, keyed so two lines that make the same plays in
+  // a different order collapse into one - otherwise "another way" would keep
+  // showing the same way reshuffled.
+  const routes = new Map<string, PlaytestExample>()
+  let closest: PlaytestExample | null = null
+  let closestScore = -1
 
   for (let trial = 0; trial < trials; trial++) {
     const rng = mulberry32(seed + trial * 7919)
@@ -160,7 +191,7 @@ export function playtest(
     })
 
     let best = scoreBoard(goal, { active: null, bench: [], stadiumKey: null, hand: [] }, labelFor)
-    let bestSteps: string[] = []
+    let bestFrames: ExampleFrame[] = []
     let bestState: SimState | null = null
     let hitBudget = false
 
@@ -177,14 +208,12 @@ export function playtest(
         usedSupporter: false,
         usedStadium: false,
         usedRetreat: false,
+        usedAbilities: [],
       }
       // The turn begins: both players draw, including the one going first.
       const started = draw(placed, 1)
 
       const result = searchBestLine(started, goal, ctx, labelFor, { maxNodes: options.maxNodes })
-      // The opening placement happens before the search, so it has to be put
-      // back at the head of the line - it is the decision most worth seeing.
-      const opening = `Start with ${hand[handIndex].label} in the Active Spot`
       if (!result.exhausted) hitBudget = true
       if (
         result.score.strict !== best.strict
@@ -192,7 +221,28 @@ export function playtest(
           : result.score.closeness > best.closeness
       ) {
         best = result.score
-        bestSteps = [opening, ...result.steps]
+        // The setup happens either side of the search, so the deal, the
+        // placement and the turn's draw are stitched back on at the head of the
+        // line - the placement is the decision most worth seeing, and the draw
+        // is where the eighth card visibly comes from.
+        bestFrames = [
+          { step: 'Draw your opening hand', board: emptyBoard(7), hand: toHand(hand) },
+          {
+            step: `Start with ${hand[handIndex].label} in the Active Spot`,
+            board: toExampleBoard(placed),
+            hand: toHand(placed.hand),
+          },
+          {
+            step: 'Draw a card to start the turn',
+            board: toExampleBoard(started),
+            hand: toHand(started.hand),
+          },
+          ...result.frames.map((state, i) => ({
+            step: result.steps[i],
+            board: toExampleBoard(state),
+            hand: toHand(state.hand),
+          })),
+        ]
         bestState = result.finalState
       }
       if (best.strict) break
@@ -207,11 +257,20 @@ export function playtest(
       partHits.set(part.id, entry)
     }
 
-    if (best.closeness > bestCloseness) {
-      bestCloseness = best.closeness
-      exampleSteps = bestSteps
-      exampleBoard = bestState ? toExampleBoard(bestState) : null
-      exampleReached = best.strict
+    // The text list is derived from the frames, so the two can never drift.
+    const bestSteps = bestFrames.slice(1).map((frame) => frame.step)
+    const example: PlaytestExample = {
+      steps: bestSteps,
+      frames: bestFrames,
+      board: bestState ? toExampleBoard(bestState) : null,
+      reached: best.strict,
+    }
+    if (best.strict) {
+      const key = [...bestSteps].sort().join('|')
+      if (routes.size < MAX_EXAMPLES && !routes.has(key)) routes.set(key, example)
+    } else if (best.closeness > closestScore) {
+      closestScore = best.closeness
+      closest = example
     }
 
     if (options.onProgress && (trial + 1) % (options.progressEvery ?? 100) === 0) {
@@ -234,11 +293,22 @@ export function playtest(
     mulliganRate: deals === 0 ? 0 : mulligans / deals,
     ignored,
     truncated,
-    exampleSteps,
-    exampleBoard,
-    exampleReached,
+    // Nothing succeeded anywhere? Then the closest attempt is the only thing
+    // worth showing.
+    examples: routes.size > 0 ? [...routes.values()] : closest ? [closest] : [],
   }
 }
+
+const toHand = (cards: DeckCard[]): ExampleCard[] =>
+  cards.map((card) => ({ cardKey: card.key, label: card.label }))
+
+/** The table before anything is placed. */
+const emptyBoard = (handCount: number): ExampleBoard => ({
+  active: null,
+  bench: [],
+  stadium: null,
+  handCount,
+})
 
 /** Trim a finished state to the handful of fields the results panel renders. */
 function toExampleBoard(state: SimState): ExampleBoard {
