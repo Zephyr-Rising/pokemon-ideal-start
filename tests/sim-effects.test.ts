@@ -102,6 +102,58 @@ describe('Buddy-Buddy Poffin', () => {
   })
 })
 
+describe('Fighting Gong', () => {
+  // A goal that names neither half of the Lunar Cycle engine, nor any Energy.
+  const goalOnly = ctx({ relevant: new Set(['target']), wantsAnyBench: false, wantsEnergy: false })
+  const lunatone = basic('Lunatone', 110, { type: '{F}' })
+  const solrock = basic('Solrock', 110, { type: '{F}' })
+  const fighting = energy('fighting', '{F}')
+  const fetched = (results: SimState[]) => results.flatMap((r) => keys(r.hand))
+
+  it('fetches a Basic {F} Pokémon or Energy the goal asks for', () => {
+    const s = state({ deck: [basic('target', 60, { type: '{F}' }), basic('other', 60, { type: '{F}' })] })
+    expect(fetched(play('Fighting Gong', s, goalOnly))).toEqual(['target'])
+  })
+
+  it('ignores cards that are not {F}', () => {
+    const s = state({ deck: [basic('target', 60, { type: '{G}' }), energy('grass', '{G}')] })
+    expect(play('Fighting Gong', s, goalOnly)).toEqual([s])
+  })
+
+  it('fetches the Energy that Lunar Cycle discards, even when the goal never names it', () => {
+    const s = state({ active: inPlay(lunatone), bench: [inPlay(solrock)], deck: [fighting] })
+    expect(fetched(play('Fighting Gong', s, goalOnly))).toEqual(['fighting'])
+  })
+
+  it('fetches Solrock to switch Lunar Cycle on, before the Energy', () => {
+    const s = state({ active: inPlay(lunatone), deck: [solrock, fighting] })
+    expect(fetched(play('Fighting Gong', s, goalOnly))).toEqual(['Solrock'])
+  })
+
+  it('fetches Lunatone when Solrock is already held', () => {
+    const s = state({ hand: [solrock], active: inPlay(basic('x')), deck: [lunatone, fighting] })
+    expect(fetched(play('Fighting Gong', s, goalOnly))).toEqual(['Solrock', 'Lunatone'])
+  })
+
+  it('leaves the engine alone once Lunar Cycle is fuelled or spent', () => {
+    const fuelled = state({
+      active: inPlay(lunatone),
+      bench: [inPlay(solrock)],
+      hand: [energy('spare', '{F}')],
+      deck: [fighting],
+    })
+    expect(play('Fighting Gong', fuelled, goalOnly)).toEqual([fuelled])
+
+    const spent = state({
+      active: inPlay(lunatone),
+      bench: [inPlay(solrock)],
+      deck: [fighting],
+      usedAbilities: ['lunatone'],
+    })
+    expect(play('Fighting Gong', spent, goalOnly)).toEqual([spent])
+  })
+})
+
 describe('Ultra Ball', () => {
   it('discards two cards and fetches any Pokémon', () => {
     const s = state({ hand: [energy('e1'), energy('e2')], deck: [exMon('target')] })

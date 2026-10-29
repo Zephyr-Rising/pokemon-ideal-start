@@ -188,3 +188,20 @@ describe('budget', () => {
     expect(result.nodes).toBeLessThan(40)
   })
 })
+
+describe('engine plays', () => {
+  it('uses Fighting Gong to fuel Lunar Cycle when the goal names neither', () => {
+    // The goal Pokémon is only reachable through Lunar Cycle's draw 3, and the
+    // only Basic {F} Energy for it to discard is in the deck.
+    const lunatone = card('lunatone', ['pokemon', 'basic'], { name: 'Lunatone', type: '{F}' })
+    const solrock = card('solrock', ['pokemon', 'basic'], { name: 'Solrock', type: '{F}' })
+    const gong = card('fighting-gong', ['item'], { name: 'Fighting Gong' })
+    const s = state({
+      hand: [lunatone, solrock, gong],
+      deck: [basic('filler1'), energy('fighting', '{F}'), basic('filler2'), basic('target')],
+    })
+    const result = run(s, goal({ bench: [slot('t', 'target')] }))
+    expect(result.score.strict).toBe(true)
+    expect(result.line.map((a) => a.kind)).toContain('useAbility')
+  })
+})

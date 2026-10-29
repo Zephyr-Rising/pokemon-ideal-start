@@ -2,6 +2,7 @@ import { norm } from '../normalize'
 import type { DeckCard } from '../types'
 import { hashString, mulberry32, shuffled } from './rng'
 import {
+  allInPlay,
   benchCap,
   cardName,
   cloneState,
@@ -190,8 +191,39 @@ registerEffect('Fighting Gong', (state, ctx) => {
   const fighting = (card: DeckCard) =>
     (isBasicEnergy(card) || isBasicPokemon(card)) && energyType(card) === '{F}'
   const found = choices(state.deck, fighting, ctx)
+  // The goal rarely names the engine itself, so its missing piece is offered
+  // too — otherwise Gong could only ever fetch what the board already lists.
+  for (const card of lunarCyclePieces(state).filter(fighting)) {
+    if (!found.some((c) => c.key === card.key)) found.push(card)
+  }
   return found.length > 0 ? found.map((card) => fetchToHand(state, card)) : [state]
 })
+
+const LUNATONE = norm('Lunatone')
+const SOLROCK = norm('Solrock')
+
+/**
+ * The deck cards that would complete Lunatone's Lunar Cycle this turn.
+ *
+ * It needs Lunatone and Solrock in play and a Basic {F} Energy in hand to
+ * discard. A piece counts as held once it is in play or in hand, since a Basic
+ * in hand can still be benched. Only the first missing piece is offered: the
+ * Energy is worthless while either Pokémon is still in the deck.
+ */
+function lunarCyclePieces(state: SimState): DeckCard[] {
+  if (state.usedAbilities.includes(LUNATONE)) return []
+  const held = [...allInPlay(state).map((slot) => slot.card), ...state.hand]
+  const has = (name: string) => held.some((card) => norm(cardName(card)) === name)
+  const fromDeck = (allowed: (card: DeckCard) => boolean) => {
+    const card = state.deck.find(allowed)
+    return card ? [card] : []
+  }
+
+  if (!has(LUNATONE)) return has(SOLROCK) ? fromDeck((c) => norm(cardName(c)) === LUNATONE) : []
+  if (!has(SOLROCK)) return fromDeck((c) => norm(cardName(c)) === SOLROCK)
+  const holdsFighting = state.hand.some((c) => isBasicEnergy(c) && energyType(c) === '{F}')
+  return holdsFighting ? [] : fromDeck((c) => isBasicEnergy(c) && energyType(c) === '{F}')
+}
 
 registerEffect('Poké Pad', (state, ctx) => {
   const found = choices(state.deck, (c) => isPokemon(c) && !hasRuleBox(c), ctx)
