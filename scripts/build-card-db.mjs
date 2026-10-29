@@ -158,6 +158,7 @@ function deriveTags(card) {
   if (rule.includes('ex')) t.add('ex')
   if (rule === 'Mega Pokémon ex') t.add('mega')
   if (rule === 'ACE SPEC') t.add('ace-spec')
+  if ((card.category ?? '').startsWith('Tera')) t.add('tera')
 
   const text = [card.effect, ...card.moves.map((m) => m.effect)].join('\n')
   const has = (re) => re.test(text)
@@ -191,14 +192,23 @@ const col = (name) => {
   if (i < 0) throw new Error('Column not found: ' + name)
   return i
 }
-const C = { id: col('Card ID'), name: col('Card Name'), rule: col('Rule') }
+const C = {
+  id: col('Card ID'),
+  name: col('Card Name'),
+  rule: col('Rule'),
+  category: col('Category'),
+}
 
 const kaggleByName = new Map()
 for (const row of csvRows.slice(1)) {
   if (row.length < csvHeader.length || clean(row[C.id]) === '') continue
   const key = norm(row[C.name])
   if (!kaggleByName.has(key)) {
-    kaggleByName.set(key, { id: Number.parseInt(row[C.id], 10), rule: clean(row[C.rule]) })
+    kaggleByName.set(key, {
+      id: Number.parseInt(row[C.id], 10),
+      rule: clean(row[C.rule]),
+      category: clean(row[C.category]),
+    })
   }
 }
 
@@ -223,6 +233,11 @@ const cards = tcgdex.cards.map((source) => {
     card.kaggleId = kaggle.id
     // The CSV models rules TCGdex omits; trust it when TCGdex found nothing.
     if (card.rule === '' && kaggle.rule !== '') card.rule = kaggle.rule
+    // TCGdex has no Tera marker at all - the word appears only in free text -
+    // so Tera comes from the CSV's Category. Cards outside the CSV are treated
+    // as non-Tera, which is why Area Zero Underdepths may understate the bench
+    // cap for a very new Tera Pokemon.
+    card.category = kaggle.category
   }
   return card
 })
