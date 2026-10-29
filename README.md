@@ -1,5 +1,7 @@
 # Ideal Start
 
+**Live: https://zephyr-rising.github.io/pokemon-ideal-start/**
+
 Two questions about a Pokémon TCG deck, from one pasted PTCG Live export:
 
 - **Opening hand** — what is in your first 8 cards, computed **exactly**.
@@ -153,43 +155,30 @@ deploy mean the same thing.
 
 ## Deployment
 
-Pushing to `main` builds and publishes to GitHub Pages via `.github/workflows/deploy.yml`, but only
-if the full pre-flight passes.
+The site is published from the **`gh-pages`** branch:
 
-Two things to set up once:
+```bash
+npm run preflight   # the gate - nothing is deployed on a red build
+npm run deploy      # builds and force-pushes the site to gh-pages
+```
 
-1. **Settings → Pages → Source = GitHub Actions.** The workflow cannot set this itself.
-2. If you rename the repository, update `PAGES_BASE` in **`pages.config.ts`** — it is the single
-   source of truth for the subpath, read by the build, the preview server and the smoke test. A
-   project page is served from `https://<user>.github.io/<repo>/`, so a mismatch breaks every asset
-   URL. The browser smoke test runs against that exact subpath specifically to catch this.
+`deploy` deliberately does not run the checks itself, so a deploy can never be
+gated on a different set of checks than CI would use. Run `preflight` first.
 
-## The turn-1 simulator
+### Switching to the Actions workflow
 
-`src/lib/sim/` models the turn exactly: one Energy, one Supporter, one Stadium and one retreat;
-retreat paid by discarding Energy; the bench capped at five, or eight only with Area Zero
-Underdepths **and** a Tera Pokémon in play. Nothing evolves, because everything in play arrived this
-turn — so Rare Candy and every evolution card are correctly dead.
+`.github/workflows-disabled/deploy.yml` is the better long-term answer: it runs
+the full pre-flight on every push to `main` and deploys only if it passes. It is
+parked outside `.github/workflows/` because GitHub refuses any push that adds or
+changes a file there unless the token carries the `workflow` scope. To enable it,
+see the README in that directory.
 
-Within a single deal the search is **deterministic**: searching your own deck is a choice, not a
-roll. The only randomness is the shuffle, and shuffle-and-draw effects (Lillie's Determination,
-Judge) seed themselves from the trial plus the state they happen in, so a branch always resolves the
-same way and backtracking stays sound.
+### If you rename the repository
 
-`effects.ts` implements the ~20 cards that can change your own board on turn 1. **An unimplemented
-card is inert, never a guess** — effect text is far too irregular to derive behaviour from, and a
-silent misread would corrupt the numbers rather than merely omit a card. The result names every card
-it ignored. Cards that genuinely cannot matter on turn 1 are deliberately absent: Unfair Stamp needs
-one of your Pokémon to have been Knocked Out, Special Red Card needs the opponent down to three
-Prizes, and Boss's Orders only moves theirs.
-
-Plays that cannot bring the board closer to your goal are never generated at all. That pruning made
-the search both faster and *more accurate*, because results now converge at a far smaller node
-budget.
-
-Tera comes from the Kaggle CSV's `Category` column — TCGdex has no Tera marker at all, the word
-appears only in free text — so a Tera Pokémon too new for that CSV is treated as non-Tera, which can
-understate the bench cap rather than overstate it.
+Update `PAGES_BASE` in **`pages.config.ts`** — the single source of truth for the
+subpath, read by the build, the preview server and the smoke test. A project page
+is served from `https://<user>.github.io/<repo>/`, so a mismatch breaks every
+asset URL. The browser smoke test runs against that exact subpath to catch it.
 
 ## Roadmap
 
