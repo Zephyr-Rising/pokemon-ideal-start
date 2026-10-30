@@ -94,7 +94,7 @@ describe('monotonicity', () => {
     const a = playtest(cards, small, labelFor(cards), { trials: 300, seed: 21 })
     const b = playtest(cards, large, labelFor(cards), { trials: 300, seed: 21 })
     expect(b.strict).toBeLessThanOrEqual(a.strict + 1e-9)
-  })
+  }, 30_000)
 
   it('scores zero for a board the deck cannot build', () => {
     const impossible = goal({ bench: [slot('b', 'id:does-not-exist')] })

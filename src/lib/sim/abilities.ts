@@ -1,7 +1,15 @@
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
 import type { EffectContext } from './effects'
-import { ACTIVE_TARGET, cardName, cloneState, energyType, type InPlay, type SimState } from './state'
+import {
+  ACTIVE_TARGET,
+  benchCap,
+  cardName,
+  cloneState,
+  energyType,
+  type InPlay,
+  type SimState,
+} from './state'
 
 /**
  * Pokémon Abilities that can change your own board on turn 1.
@@ -32,6 +40,20 @@ export interface AbilityDef {
   usable?: (state: SimState, slot: InPlay) => boolean
   /** Every board this Ability can produce. */
   apply: (state: SimState, target: number, ctx: EffectContext) => SimState[]
+  /**
+   * Set on draw and search Abilities: what else the Ability needs, so that a
+   * search card can fetch the missing piece even when the goal never names it.
+   */
+  engine?: EnginePieces
+}
+
+export interface EnginePieces {
+  /** Another Pokémon that must be in play, as Solrock is for Lunar Cycle. */
+  partner?: string
+  /** A card the Ability spends from hand, such as the Energy it discards. */
+  fuel?: (card: DeckCard) => boolean
+  /** Anything else that decides whether the Ability would do anything now. */
+  worthIt?: (state: SimState) => boolean
 }
 
 const ABILITIES = new Map<string, AbilityDef>()
@@ -144,6 +166,51 @@ export function onBenchPlay(state: SimState, benchIndex: number, ctx: EffectCont
   return [...def.apply(spend(state, slot.card), benchIndex, ctx), state]
 }
 
+/**
+ * Deck or discard cards worth fetching because they finish a draw engine.
+ *
+ * The goal names the board you want, not the engine that digs for it, so
+ * without this a search card could never fetch Solrock or the Energy Lunar
+ * Cycle discards. Pieces are the Pokémon, its partner, then its fuel, and only
+ * the **first** missing one is offered: the Energy is worthless while Solrock
+ * is still in the deck, and offering everything would multiply the search.
+ *
+ * An engine with several pieces counts only once one of them is already held
+ * (in play, or in hand where a Basic can still be benched), so a deck is not
+ * dragged into building an engine it has shown no sign of using. Abilities
+ * that only work from the Active Spot are left out: getting one there costs a
+ * switch on top of the fetch, which a draw of 2 does not repay.
+ */
+export function engineWants(state: SimState): (card: DeckCard) => boolean {
+  const held = [...inPlayCards(state).map((slot) => slot.card), ...state.hand]
+  const holds = (name: string) => held.some((card) => norm(cardName(card)) === norm(name))
+  const named = (name: string) => (card: DeckCard) => norm(cardName(card)) === norm(name)
+  const room = state.bench.length < benchCap(state)
+  const wanted: ((card: DeckCard) => boolean)[] = []
+
+  for (const [pokemon, def] of ABILITIES) {
+    const engine = def.engine
+    if (!engine || def.activeOnly) continue
+    if (state.usedAbilities.includes(pokemon)) continue
+    if (engine.worthIt && !engine.worthIt(state)) continue
+
+    const pieces = [
+      { held: holds(pokemon), is: named(pokemon), bench: true },
+      ...(engine.partner
+        ? [{ held: holds(engine.partner), is: named(engine.partner), bench: true }]
+        : []),
+      ...(engine.fuel ? [{ held: state.hand.some(engine.fuel), is: engine.fuel, bench: false }] : []),
+    ]
+    const missing = pieces.filter((piece) => !piece.held)
+    if (missing.length === 0) continue
+    if (pieces.length > 1 && missing.length === pieces.length) continue
+    // Each missing Pokémon needs a bench slot, so a full bench ends the engine.
+    if (!room && missing.some((piece) => piece.bench)) continue
+    wanted.push(missing[0].is)
+  }
+  return (card) => wanted.some((is) => is(card))
+}
+
 // --- draw and search -------------------------------------------------------
 
 // "Once during your turn, if this Pokemon is in the Active Spot, draw 2 cards."
@@ -158,6 +225,10 @@ register('Mega Kangaskhan ex', {
 register('Meowth ex', {
   ability: 'Last-Ditch Catch',
   onBenchPlay: true,
+  engine: {
+    worthIt: (state) =>
+      !state.usedSupporter && state.deck.some((card) => card.tags.includes('supporter')),
+  },
   apply: (state, _target, ctx) => {
     const supporters = state.deck.filter((card) => card.tags.includes('supporter'))
     const wanted = supporters.filter((card) => ctx.relevant.has(card.key))
@@ -174,6 +245,7 @@ register('Meowth ex', {
 // your one attachment for the turn.
 register('Teal Mask Ogerpon ex', {
   ability: 'Teal Dance',
+  engine: { fuel: (card) => isBasicEnergy(card) && energyType(card) === '{G}' },
   usable: (state) => holdsEnergy(state, '{G}'),
   apply: (state, target) => {
     const next = cloneState(state)
@@ -192,6 +264,10 @@ register('Teal Mask Ogerpon ex', {
 // turn-1 job is being on the board to switch this on. Both halves are {F}.
 register('Lunatone', {
   ability: 'Lunar Cycle',
+  engine: {
+    partner: 'Solrock',
+    fuel: (card) => isBasicEnergy(card) && energyType(card) === '{F}',
+  },
   usable: (state) => hasInPlay(state, 'Solrock') && holdsEnergy(state, '{F}'),
   apply: (state) => {
     const next = cloneState(state)

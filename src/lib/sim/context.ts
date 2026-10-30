@@ -10,6 +10,10 @@ import type { ActionContext } from './actions'
  * asked for, plus Basics when it only wants more bodies and Energy when it
  * wants Energy. That keeps the branching small without losing any line that
  * could have reached the goal.
+ *
+ * The one exception is a draw engine, which reaches the goal indirectly. That
+ * depends on what is already on the board, so it is worked out per state by
+ * `engineWants` in `abilities.ts` rather than fixed here.
  */
 export function buildContext(goal: FieldGoal, rng: () => number, seed = 1): ActionContext {
   const relevant = new Set<string>()

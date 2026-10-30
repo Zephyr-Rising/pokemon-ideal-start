@@ -154,6 +154,58 @@ describe('Fighting Gong', () => {
   })
 })
 
+describe('draw engines', () => {
+  // Nothing here is named by the goal; each fetch is justified by an engine.
+  const goalOnly = ctx({ relevant: new Set(['target']), wantsAnyBench: false, wantsEnergy: false })
+  const fetched = (results: SimState[], before: SimState) =>
+    results.flatMap((r) => keys(r.hand).filter((k) => !keys(before.hand).includes(k)))
+  const meowth = exMon('Meowth ex', 170)
+  const ogerpon = exMon('Teal Mask Ogerpon ex', 210)
+  const kangaskhan = exMon('Mega Kangaskhan ex', 300)
+  const supporter = trainer("Lillie's Determination", 'supporter')
+
+  it('Ultra Ball fetches Meowth ex while a Supporter is still to be found and played', () => {
+    const s = state({ hand: [energy('a'), energy('b')], deck: [meowth, supporter] })
+    expect(fetched(play('Ultra Ball', s, goalOnly), s)).toEqual(['Meowth ex'])
+  })
+
+  it('leaves Meowth ex alone once the Supporter for the turn is played', () => {
+    const s = state({
+      hand: [energy('a'), energy('b')],
+      deck: [meowth, supporter],
+      usedSupporter: true,
+    })
+    expect(fetched(play('Ultra Ball', s, goalOnly), s)).toEqual([])
+  })
+
+  it('fetches the Grass Energy that Teal Dance needs once Ogerpon is in play', () => {
+    const s = state({ active: inPlay(ogerpon), deck: [energy('fire', '{R}'), energy('grass', '{G}')] })
+    expect(fetched(play('Hilda', s, goalOnly), s)).toEqual(['grass'])
+  })
+
+  it('does not start an engine the board shows no sign of', () => {
+    // Lunatone needs Solrock and an {F} Energy; holding none of the three,
+    // fetching one would just be a card the goal cannot use.
+    const s = state({ hand: [energy('a'), energy('b')], deck: [basic('Lunatone', 110, { type: '{F}' })] })
+    expect(fetched(play('Ultra Ball', s, goalOnly), s)).toEqual([])
+  })
+
+  it('skips Abilities that only work from the Active Spot', () => {
+    const s = state({ hand: [energy('a'), energy('b')], deck: [kangaskhan] })
+    expect(fetched(play('Ultra Ball', s, goalOnly), s)).toEqual([])
+  })
+
+  it('still prefers the goal card when the effect only takes one', () => {
+    const s = state({ hand: [], deck: [meowth, exMon('target')] })
+    const results = play('Poké Pad', s, goalOnly)
+    // Poké Pad cannot take a Rule Box Pokémon, so neither is offered...
+    expect(fetched(results, s)).toEqual([])
+    // ...but Cyrano can, and the goal's card comes first.
+    const cyrano = play('Cyrano', state({ deck: [meowth, exMon('target'), supporter] }), goalOnly)
+    expect(keys(cyrano[0].hand)).toEqual(['target', 'Meowth ex'])
+  })
+})
+
 describe('Ultra Ball', () => {
   it('discards two cards and fetches any Pokémon', () => {
     const s = state({ hand: [energy('e1'), energy('e2')], deck: [exMon('target')] })

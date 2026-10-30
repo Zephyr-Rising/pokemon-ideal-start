@@ -1,8 +1,8 @@
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
 import { hashString, mulberry32, shuffled } from './rng'
+import { engineWants } from './abilities'
 import {
-  allInPlay,
   benchCap,
   cardName,
   cloneState,
@@ -103,10 +103,21 @@ const useful = (card: DeckCard, ctx: EffectContext): boolean => keepRank(card, c
  * has no use for is skipped entirely: it cannot bring the board closer, and
  * branching on it would blow up the tree for nothing.
  */
-function choices(pool: DeckCard[], allowed: (card: DeckCard) => boolean, ctx: EffectContext) {
+function choices(
+  state: SimState,
+  pool: DeckCard[],
+  allowed: (card: DeckCard) => boolean,
+  ctx: EffectContext,
+) {
   const seen = new Map<string, DeckCard>()
   for (const card of pool) {
     if (allowed(card) && useful(card, ctx) && !seen.has(card.key)) seen.set(card.key, card)
+  }
+  // Engine pieces come after the goal's own cards, so a single-pick effect
+  // still takes what the goal asked for when it can.
+  const finishesEngine = engineWants(state)
+  for (const card of pool) {
+    if (allowed(card) && finishesEngine(card) && !seen.has(card.key)) seen.set(card.key, card)
   }
   return [...seen.values()]
 }
@@ -150,7 +161,7 @@ registerEffect('Buddy-Buddy Poffin', (state, ctx) => {
   // onto your Bench."
   const eligible = (card: DeckCard) => isBasicPokemon(card) && hp(card) <= 70
   const out: SimState[] = []
-  const first = choices(state.deck, eligible, ctx)
+  const first = choices(state, state.deck, eligible, ctx)
 
   for (const a of first) {
     const afterFirst = cloneState(state)
@@ -159,7 +170,7 @@ registerEffect('Buddy-Buddy Poffin', (state, ctx) => {
     afterFirst.bench.push(inPlay(a))
     out.push(afterFirst)
 
-    for (const b of choices(afterFirst.deck, eligible, ctx)) {
+    for (const b of choices(afterFirst, afterFirst.deck, eligible, ctx)) {
       if (afterFirst.bench.length >= benchCap(afterFirst)) break
       const afterSecond = cloneState(afterFirst)
       removeFirst(afterSecond.deck, b)
@@ -177,7 +188,7 @@ registerEffect('Buddy-Buddy Poffin', (state, ctx) => {
 registerEffect('Ultra Ball', (state, ctx) => {
   const paid = payDiscard(state, 2, ctx)
   if (!paid) return [state]
-  const found = choices(paid.deck, isPokemon, ctx)
+  const found = choices(paid, paid.deck, isPokemon, ctx)
   return found.length > 0 ? found.map((card) => fetchToHand(paid, card)) : [paid]
 })
 
@@ -190,49 +201,18 @@ registerEffect('Fighting Gong', (state, ctx) => {
   // draw 3, and the Pokémon can be the Solrock that switches Lunar Cycle on.
   const fighting = (card: DeckCard) =>
     (isBasicEnergy(card) || isBasicPokemon(card)) && energyType(card) === '{F}'
-  const found = choices(state.deck, fighting, ctx)
-  // The goal rarely names the engine itself, so its missing piece is offered
-  // too — otherwise Gong could only ever fetch what the board already lists.
-  for (const card of lunarCyclePieces(state).filter(fighting)) {
-    if (!found.some((c) => c.key === card.key)) found.push(card)
-  }
+  const found = choices(state, state.deck, fighting, ctx)
   return found.length > 0 ? found.map((card) => fetchToHand(state, card)) : [state]
 })
 
-const LUNATONE = norm('Lunatone')
-const SOLROCK = norm('Solrock')
-
-/**
- * The deck cards that would complete Lunatone's Lunar Cycle this turn.
- *
- * It needs Lunatone and Solrock in play and a Basic {F} Energy in hand to
- * discard. A piece counts as held once it is in play or in hand, since a Basic
- * in hand can still be benched. Only the first missing piece is offered: the
- * Energy is worthless while either Pokémon is still in the deck.
- */
-function lunarCyclePieces(state: SimState): DeckCard[] {
-  if (state.usedAbilities.includes(LUNATONE)) return []
-  const held = [...allInPlay(state).map((slot) => slot.card), ...state.hand]
-  const has = (name: string) => held.some((card) => norm(cardName(card)) === name)
-  const fromDeck = (allowed: (card: DeckCard) => boolean) => {
-    const card = state.deck.find(allowed)
-    return card ? [card] : []
-  }
-
-  if (!has(LUNATONE)) return has(SOLROCK) ? fromDeck((c) => norm(cardName(c)) === LUNATONE) : []
-  if (!has(SOLROCK)) return fromDeck((c) => norm(cardName(c)) === SOLROCK)
-  const holdsFighting = state.hand.some((c) => isBasicEnergy(c) && energyType(c) === '{F}')
-  return holdsFighting ? [] : fromDeck((c) => isBasicEnergy(c) && energyType(c) === '{F}')
-}
-
 registerEffect('Poké Pad', (state, ctx) => {
-  const found = choices(state.deck, (c) => isPokemon(c) && !hasRuleBox(c), ctx)
+  const found = choices(state, state.deck, (c) => isPokemon(c) && !hasRuleBox(c), ctx)
   return found.length > 0 ? found.map((card) => fetchToHand(state, card)) : [state]
 })
 
 registerEffect('Cyrano', (state, ctx) => {
   // "Up to 3 Pokémon ex" — taking the ones the goal wants is never worse.
-  const found = choices(state.deck, (c) => isPokemon(c) && hasRuleBox(c), ctx).slice(0, 3)
+  const found = choices(state, state.deck, (c) => isPokemon(c) && hasRuleBox(c), ctx).slice(0, 3)
   if (found.length === 0) return [state]
   const next = cloneState(state)
   for (const card of found) {
@@ -245,7 +225,7 @@ registerEffect('Cyrano', (state, ctx) => {
 registerEffect('Dawn', (state, ctx) => {
   // One Basic, one Stage 1 and one Stage 2 — independent picks, so take the
   // most useful of each rather than branching on all combinations.
-  const pick = (allowed: (c: DeckCard) => boolean) => choices(state.deck, allowed, ctx)[0]
+  const pick = (allowed: (c: DeckCard) => boolean) => choices(state, state.deck, allowed, ctx)[0]
   const wanted = [
     pick((c) => isBasicPokemon(c)),
     pick((c) => c.tags.includes('stage1')),
@@ -261,8 +241,8 @@ registerEffect('Dawn', (state, ctx) => {
 })
 
 registerEffect('Hilda', (state, ctx) => {
-  const evolution = choices(state.deck, isEvolution, ctx)[0]
-  const energy = choices(state.deck, isEnergy, ctx)[0]
+  const evolution = choices(state, state.deck, isEvolution, ctx)[0]
+  const energy = choices(state, state.deck, isEnergy, ctx)[0]
   const wanted = [evolution, energy].filter((c): c is DeckCard => c !== undefined)
   if (wanted.length === 0) return [state]
   const next = cloneState(state)
@@ -276,7 +256,7 @@ registerEffect('Hilda', (state, ctx) => {
 registerEffect('Secret Box', (state, ctx) => {
   const paid = payDiscard(state, 3, ctx)
   if (!paid) return [state]
-  const pick = (allowed: (c: DeckCard) => boolean) => choices(paid.deck, allowed, ctx)[0]
+  const pick = (allowed: (c: DeckCard) => boolean) => choices(paid, paid.deck, allowed, ctx)[0]
   const wanted = [
     pick((c) => c.tags.includes('item')),
     pick((c) => c.tags.includes('tool')),
@@ -323,7 +303,7 @@ registerEffect('Judge', (state, ctx) => [refreshHand(state, 4, ctx)])
 
 registerEffect('Crispin', (state, ctx) => {
   // Two Basic Energy of different types: one to hand, one attached.
-  const basics = choices(state.deck, isBasicEnergy, ctx)
+  const basics = choices(state, state.deck, isBasicEnergy, ctx)
   if (basics.length === 0) return [state]
 
   const out: SimState[] = []
@@ -437,7 +417,7 @@ registerEffect('Switch', (state) => {
 // --- recovery --------------------------------------------------------------
 
 registerEffect('Night Stretcher', (state, ctx) => {
-  const found = choices(state.discard, (c) => isPokemon(c) || isBasicEnergy(c), ctx)
+  const found = choices(state, state.discard, (c) => isPokemon(c) || isBasicEnergy(c), ctx)
   if (found.length === 0) return [state]
   return found.map((card) => {
     const next = cloneState(state)
@@ -450,6 +430,7 @@ registerEffect('Night Stretcher', (state, ctx) => {
 registerEffect("Lana's Aid", (state, ctx) => {
   // Up to 3 Pokémon without a Rule Box and/or Basic Energy.
   const found = choices(
+    state,
     state.discard,
     (c) => (isPokemon(c) && !hasRuleBox(c)) || isBasicEnergy(c),
     ctx,
