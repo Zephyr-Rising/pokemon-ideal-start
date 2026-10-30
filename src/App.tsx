@@ -31,8 +31,11 @@ const cardSignature = (keys: string[]): string => [...keys].sort().join('|')
 type Tab = 'hand' | 'board' | 'turns'
 
 const TRIAL_CHOICES = [500, 1500, 4000] as const
-/** Each game plays up to six turns, so fewer games keep a run quick. */
-const TURN_TRIAL_CHOICES = [100, 300, 1000] as const
+/**
+ * Each game plays up to six turns, carrying several boards from each into the
+ * next, so a game costs far more than on turn 1 and fewer keep a run quick.
+ */
+const TURN_TRIAL_CHOICES = [100, 200, 500] as const
 
 export default function App() {
   const [text, setText] = useState('')
@@ -41,7 +44,7 @@ export default function App() {
   const [edited, setEdited] = useState(false)
   const [tab, setTab] = useState<Tab>('hand')
   const [trials, setTrials] = useState<number>(1500)
-  const [turnTrials, setTurnTrials] = useState<number>(300)
+  const [turnTrials, setTurnTrials] = useState<number>(200)
 
   const deck = useMemo(() => resolveDeck(text), [text])
 

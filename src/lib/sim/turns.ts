@@ -1,31 +1,30 @@
 import { goalIsEmpty, type FieldGoal, type GoalScore } from '../board/goal'
 import type { DeckCard } from '../types'
-import type { ActionContext } from './actions'
+import { draw, type ActionContext } from './actions'
 import { buildContext } from './context'
 import {
+  emptyBoard,
   ignoredCards,
   physicalDeck,
-  playDeal,
   toExampleBoard,
   toHand,
   type Deal,
   type ExampleFrame,
 } from './playtest'
 import { mulberry32, shuffled } from './rng'
-import { searchBestLine } from './search'
-import { isBasicPokemon, startNextTurn, type SimState } from './state'
+import { lineOf, outranks, searchBestLine, type Alternative } from './search'
+import { inPlay, isBasicPokemon, signature, startNextTurn, type SimState } from './state'
 
 /**
  * How many turns a deck takes to build a board, rather than whether it does so
  * on turn 1.
  *
- * Each turn is searched for the best board it can reach, as on turn 1, and the
- * board it ends on is carried into the next: the once-per-turn plays come back,
- * a card is drawn, and from the second turn Pokémon can evolve. That is a
- * greedy plan — each turn plays its own best, it never holds back for a later
- * one — so a deck that wins by sandbagging is slightly understated. With no
- * opponent there is nothing to interrupt the plan either, so the figures are
- * best read as the deck's own pace.
+ * Each turn is searched for the boards it can reach, as on turn 1, and the best
+ * few are carried into the next: the once-per-turn plays come back, a card is
+ * drawn, and from the second turn Pokémon can evolve. Carrying several boards
+ * rather than one lets a turn set up for the next instead of only scoring its
+ * own best. With no opponent there is nothing to interrupt the plan, so the
+ * figures are best read as the deck's own pace.
  */
 
 export const MAX_TURNS = 6
@@ -109,7 +108,58 @@ export interface TurnsResult extends TurnsOrderDetail {
   examples: TurnsExample[]
 }
 
-/** Plays one deal out over up to MAX_TURNS turns; the turn it got there, or null. */
+/**
+ * How many end-of-turn boards are carried into the next turn.
+ *
+ * Playing each turn for its own best board and carrying only that one forward
+ * finishes boards well after a real player would: the board that scores best
+ * now is often not the best start for the next turn. Carrying the best few
+ * and continuing each one fixes most of it. Measured on the benchmark boards,
+ * going from 1 to 8 raised "built by turn 3" from 55% to 75% (Dragapult) and
+ * from 25% to 55% (Festival Lead); beyond 8 the gains were a point or two.
+ */
+const BEAM_WIDTH = 8
+
+/** One board being carried forward, and how the game got there. */
+interface Branch {
+  state: SimState
+  score: GoalScore
+  setup: number
+  history: BranchTurn[]
+}
+
+/** One turn of a branch's game. */
+interface BranchTurn {
+  turn: number
+  /** The board once the turn's card is drawn. */
+  started: SimState
+  /** Turn 1 only: the opening hand and the placement before the draw. */
+  opening?: { hand: DeckCard[]; placed: SimState }
+  /** The turn's line, as the search left it. */
+  line: Alternative
+}
+
+/** Best first, one per distinct board, at most BEAM_WIDTH. */
+function strongest(branches: Branch[]): Branch[] {
+  const seen = new Set<string>()
+  return branches
+    .sort((a, b) => (outranks(a, b) ? -1 : outranks(b, a) ? 1 : 0))
+    .filter((branch) => {
+      const key = signature(branch.state)
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .slice(0, BEAM_WIDTH)
+}
+
+/**
+ * Plays one deal out over up to MAX_TURNS turns; the turn it got there, or null.
+ *
+ * Each turn is searched from every board carried forward, and the best few
+ * boards any of them can end on are carried into the next turn (see
+ * `BEAM_WIDTH`). The game ends the first time any of them builds the board.
+ */
 function turnsToBuild(
   deal: Deal,
   goal: FieldGoal,
@@ -118,91 +168,132 @@ function turnsToBuild(
   maxNodes: number | undefined,
   goingFirst: boolean,
 ): GameOutcome {
-  // The first turn each part of the board was in place at the end of a turn.
+  let searches = 0
+  let truncatedSearches = 0
+  const search = (started: SimState) => {
+    const result = searchBestLine(started, goal, ctx, labelFor, { maxNodes, keep: BEAM_WIDTH })
+    searches++
+    if (!result.exhausted) truncatedSearches++
+    return result
+  }
+  const finish = (branch: Branch | undefined, turn: number | null) =>
+    gameOutcome(branch, turn, searches, truncatedSearches)
+
+  // Turn 1: every distinct Basic that could start Active, the goal's own first.
+  const { hand, prizes, rest } = deal
+  const starters = new Map<string, number>()
+  hand.forEach((card, index) => {
+    if (isBasicPokemon(card) && !starters.has(card.key)) starters.set(card.key, index)
+  })
+  const rank = (index: number) => ctx.activeLineage?.get(hand[index].key) ?? Infinity
+  let frontier: Branch[] = []
+  for (const index of [...starters.values()].sort((a, b) => rank(a) - rank(b))) {
+    const placed: SimState = {
+      hand: hand.filter((_, i) => i !== index),
+      deck: rest,
+      discard: [],
+      prizes,
+      active: inPlay(hand[index]),
+      bench: [],
+      stadium: null,
+      usedEnergy: false,
+      // Going first, the turn's Supporter is simply already spent.
+      usedSupporter: goingFirst,
+      usedStadium: false,
+      usedRetreat: false,
+      usedAbilities: [],
+    }
+    // Both players draw on their first turn, including the one going first.
+    const started = draw(placed, 1)
+    const result = search(started)
+    const branches = result.alternatives.map((line) => ({
+      ...line,
+      history: [{ turn: 1, started, opening: { hand, placed }, line }],
+    }))
+    if (result.score.strict) return finish(branches[0], 1)
+    frontier.push(...branches)
+  }
+  frontier = strongest(frontier)
+
+  for (let turn = 2; turn <= MAX_TURNS; turn++) {
+    const next: Branch[] = []
+    for (const branch of frontier) {
+      // Drawing from an empty deck loses the game before the turn starts.
+      if (branch.state.deck.length === 0) continue
+      const started = startNextTurn(branch.state)
+      const result = search(started)
+      const continued = result.alternatives.map((line) => ({
+        ...line,
+        history: [...branch.history, { turn, started, line }],
+      }))
+      if (result.score.strict) return finish(continued[0], turn)
+      next.push(...continued)
+    }
+    if (next.length === 0) break
+    frontier = strongest(next)
+  }
+  return finish(frontier[0], null)
+}
+
+/**
+ * Everything kept about one game: the turn it got there, its search counts,
+ * when each part came together, and its turns as lines to show.
+ *
+ * Parts and the shown game follow the winning branch, or for a game that never
+ * got there, the strongest branch at the end.
+ */
+function gameOutcome(
+  branch: Branch | undefined,
+  turn: number | null,
+  searches: number,
+  truncatedSearches: number,
+): GameOutcome {
   const parts = new Map<string, { label: string; turn: number | null }>()
-  const record = (score: GoalScore, turn: number) => {
-    for (const part of score.parts) {
+  for (const step of branch?.history ?? []) {
+    for (const part of step.line.score.parts) {
       const entry = parts.get(part.id) ?? { label: part.label, turn: null }
-      if (part.met && entry.turn === null) entry.turn = turn
+      if (part.met && entry.turn === null) entry.turn = step.turn
       parts.set(part.id, entry)
     }
   }
-
-  const first = playDeal(deal, goal, ctx, labelFor, maxNodes, goingFirst)
-  let hitBudget = first.hitBudget
-  // Turn 1 runs one search per opening tried; counted as one turn here.
-  let searches = 1
-  let truncatedSearches = first.hitBudget ? 1 : 0
-  record(first.score, 1)
-  // Kept as the search left it; turned into readable frames only if this game
-  // becomes an example, which most never do.
-  const later: LaterTurn[] = []
-  const done = (turn: number | null): GameOutcome => ({
+  return {
     turn,
-    hitBudget,
+    hitBudget: truncatedSearches > 0,
     searches,
     truncatedSearches,
     parts,
-    first: first.frames,
-    later,
-  })
-  if (first.score.strict) return done(1)
-
-  let state: SimState | null = first.finalState
-  for (let turn = 2; turn <= MAX_TURNS && state; turn++) {
-    // Drawing from an empty deck loses the game before the turn starts.
-    if (state.deck.length === 0) break
-    const started = startNextTurn(state)
-    const result = searchBestLine(started, goal, ctx, labelFor, { maxNodes })
-    searches++
-    if (!result.exhausted) {
-      hitBudget = true
-      truncatedSearches++
-    }
-    record(result.score, turn)
-    later.push({ turn, started, steps: result.steps, frames: result.frames })
-    if (result.score.strict) return done(turn)
-    state = result.finalState
+    history: branch?.history ?? [],
   }
-  return done(null)
-}
-
-/** A turn after the first, as the search left it. */
-interface LaterTurn {
-  turn: number
-  /** The board once the turn's card is drawn. */
-  started: SimState
-  steps: string[]
-  frames: SimState[]
 }
 
 /** Turn a game's history into an example: steps grouped by turn, plus frames. */
 function toTurnsExample(game: GameOutcome, goingFirst: boolean): TurnsExample {
-  const turns: TurnsExampleTurn[] = [
-    {
-      turn: 1,
-      // The first frame is the deal itself, which has no step of its own.
-      steps: game.first.slice(1).map((frame) => frame.step),
-      frames: game.first,
-    },
-  ]
-  for (const later of game.later) {
-    const draw: ExampleFrame = {
-      step: `Turn ${later.turn}: draw a card`,
-      board: toExampleBoard(later.started),
-      hand: toHand(later.started.hand),
-    }
-    const plays = later.frames.map((state, i) => ({
-      step: later.steps[i],
+  const turns = game.history.map((step): TurnsExampleTurn => {
+    const { steps, frames } = lineOf(step.line)
+    const plays = frames.map((state, i) => ({
+      step: steps[i],
       board: toExampleBoard(state),
       hand: toHand(state.hand),
     }))
-    turns.push({
-      turn: later.turn,
-      steps: [draw.step, ...plays.map((frame) => frame.step)],
-      frames: [draw, ...plays],
-    })
-  }
+    const draw: ExampleFrame = {
+      step: step.turn === 1 ? 'Draw a card to start the turn' : `Turn ${step.turn}: draw a card`,
+      board: toExampleBoard(step.started),
+      hand: toHand(step.started.hand),
+    }
+    const opening: ExampleFrame[] = step.opening
+      ? [
+          { step: 'Draw your opening hand', board: emptyBoard(7), hand: toHand(step.opening.hand) },
+          {
+            step: `Start with ${step.opening.placed.active!.card.label} in the Active Spot`,
+            board: toExampleBoard(step.opening.placed),
+            hand: toHand(step.opening.placed.hand),
+          },
+        ]
+      : []
+    const all = [...opening, draw, ...plays]
+    // The deal itself is a frame with no step of its own.
+    return { turn: step.turn, steps: all.slice(step.opening ? 1 : 0).map((f) => f.step), frames: all }
+  })
   return { turn: game.turn!, goingFirst, turns }
 }
 
@@ -210,14 +301,13 @@ interface GameOutcome {
   /** The turn the whole board came together, or null. */
   turn: number | null
   hitBudget: boolean
-  /** Turns played, and how many of their searches hit the budget. */
+  /** Turn searches run, and how many hit the budget. */
   searches: number
   truncatedSearches: number
   /** The turn each part first came together, or null. */
   parts: Map<string, { label: string; turn: number | null }>
-  /** Turn 1's frames, deal first. */
-  first: ExampleFrame[]
-  later: LaterTurn[]
+  /** The shown game's turns, as the search left them. */
+  history: BranchTurn[]
 }
 
 /** Running tally of the turn each game got there, for one order. */

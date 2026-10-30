@@ -46,6 +46,18 @@ export interface Alternative {
   state: SimState
   score: GoalScore
   setup: number
+  /** The last play of the line that reached it; null when no play was made. */
+  step: Step | null
+}
+
+/** The plays and boards of an alternative's line, rebuilt on demand. */
+export function lineOf(alt: Alternative): { steps: string[]; frames: SimState[] } {
+  const chain: Step[] = []
+  for (let step = alt.step; step; step = step.previous) chain.unshift(step)
+  return {
+    steps: chain.map((step) => describeStep(step.before, step.after, step.action)),
+    frames: chain.map((step) => step.after),
+  }
 }
 
 export interface SearchOptions {
@@ -93,7 +105,7 @@ export function setupScore(state: SimState, ctx: ActionContext): number {
 }
 
 /** One play in a line: what was done, and the boards either side of it. */
-interface Step {
+export interface Step {
   action: Action
   before: SimState
   after: SimState
@@ -225,7 +237,7 @@ export function searchBestLine(
 
     const score = scoreBoard(goal, toBoardView(state), labelFor)
     const setup = ctx.multiTurn ? setupScore(state, ctx) : 0
-    if (keep > 1) remember({ state, score, setup })
+    if (keep > 1) remember({ state, score, setup, step })
     const tie = ties(score, best) && (!ctx.multiTurn || setup === bestSetup)
     if (
       better(score, best) ||
@@ -270,10 +282,23 @@ export function searchBestLine(
     }
   }
 
-  const alternatives = kept.map((alt) => {
+  const alternatives = kept.map((alt): Alternative => {
     const attached = closingAttachment(alt.state, ctx)
-    return attached ? { ...alt, state: attached.next, setup: setupScore(attached.next, ctx) } : alt
+    if (!attached) return alt
+    const score = scoreBoard(goal, toBoardView(attached.next), labelFor)
+    // The same guard as the best line: never at the board's expense.
+    if (score.strict !== alt.score.strict || score.closeness < alt.score.closeness) return alt
+    return {
+      state: attached.next,
+      score,
+      setup: ctx.multiTurn ? setupScore(attached.next, ctx) : 0,
+      step: { action: attached.action, before: alt.state, after: attached.next, previous: alt.step },
+    }
   })
+  // With only the best asked for, it stands in as the single alternative.
+  if (alternatives.length === 0) {
+    alternatives.push({ state: bestState, score: best, setup: bestSetup, step: bestNode })
+  }
 
   const chain: Step[] = []
   for (let step: Step | null = bestNode; step; step = step.previous) chain.unshift(step)
@@ -290,7 +315,10 @@ export function searchBestLine(
 }
 
 /** Does `a` rank above `b` as a board to end the turn on? */
-export function outranks(a: Alternative, b: Alternative): boolean {
+export function outranks(
+  a: Pick<Alternative, 'score' | 'setup'>,
+  b: Pick<Alternative, 'score' | 'setup'>,
+): boolean {
   if (a.score.strict !== b.score.strict) return a.score.strict
   if (a.score.closeness !== b.score.closeness) return a.score.closeness > b.score.closeness
   return a.setup > b.setup

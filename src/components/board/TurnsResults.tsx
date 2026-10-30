@@ -135,10 +135,10 @@ export function TurnsResults({ goal, state, cards, onFewer }: Props) {
 
             <p className="mt-4 border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-800">
               Each game is played turn by turn, drawing a card each turn and evolving from the
-              second, with each turn making the best progress it can toward the board. It never
-              holds back for a later turn and there is no opponent to interrupt it, so read this as
-              the deck's own pace. The average counts only the games that get there by turn{' '}
-              {MAX_TURNS}.
+              second. Several of the most promising boards are carried from each turn into the
+              next, so a turn can set up for the one after rather than only making its own best
+              progress. There is no opponent to interrupt it, so read this as the deck's own pace.
+              The average counts only the games that get there by turn {MAX_TURNS}.
             </p>
           </div>
 

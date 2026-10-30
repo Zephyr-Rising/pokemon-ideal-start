@@ -284,7 +284,7 @@ export const toHand = (cards: DeckCard[]): ExampleCard[] =>
   cards.map((card) => ({ cardKey: card.key, label: card.label }))
 
 /** The table before anything is placed. */
-const emptyBoard = (handCount: number): ExampleBoard => ({
+export const emptyBoard = (handCount: number): ExampleBoard => ({
   active: null,
   bench: [],
   stadium: null,
