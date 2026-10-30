@@ -17,6 +17,7 @@ import {
   removeHand,
   removeTool,
   setBenchMin,
+  setEnergyMin,
   setHandMin,
   removeSlotEnergy,
   addChoice,
@@ -385,6 +386,29 @@ export function BoardEditor({ cards, goal, onChange, horizon = 'turn1' }: Props)
                   )}
                 </div>
               </Zone>
+              {/* A total across every Pokémon, whatever the Energy. */}
+              <div className="flex items-baseline justify-end gap-2 pt-1">
+                <label className="flex items-center gap-1 text-xs text-slate-500">
+                  at least
+                  <input
+                    type="number"
+                    min={0}
+                    max={20}
+                    value={goal.energyMin ?? 0}
+                    onChange={(e) => onChange(setEnergyMin(goal, Number(e.target.value) || 0))}
+                    aria-label="Minimum Energy attached in total"
+                    className="tnum w-14 rounded-md border border-slate-300 px-1.5 py-0.5 dark:border-slate-700 dark:bg-slate-950"
+                  />
+                  Energy attached in total
+                </label>
+                {(goal.energyMin ?? 0) > 0 && (
+                  <ConditionPriority
+                    label={`${goal.energyMin} or more Energy attached`}
+                    priority={goal.priorities?.energyMin ?? 1}
+                    onPriority={(level) => onChange(setPartPriority(goal, 'energyMin', level))}
+                  />
+                )}
+              </div>
             </div>
           </div>
 

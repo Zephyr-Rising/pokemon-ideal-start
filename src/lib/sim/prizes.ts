@@ -139,9 +139,13 @@ export function boardRequirements(
   }
 
   // All the Energy the board asks for, of any kind.
-  const totalEnergy = slots.reduce(
-    (sum, slot) => sum + slot.energy.filter((_, index) => energyCounts(slot, index)).length,
-    0,
+  const totalEnergy = Math.max(
+    slots.reduce(
+      (sum, slot) => sum + slot.energy.filter((_, index) => energyCounts(slot, index)).length,
+      0,
+    ),
+    // "At least N Energy attached", whatever and wherever.
+    counts('energyMin') ? (goal.energyMin ?? 0) : 0,
   )
   if (totalEnergy > 0) {
     need('energy:total', () => ({ label: 'Energy', matches: (card) => card.tags.includes('energy') }), totalEnergy)

@@ -62,6 +62,11 @@ export interface FieldGoal {
    * are. 0 (or absent) disables it.
    */
   handMin?: number
+  /**
+   * "At least this many Energy attached" across all your Pokémon, of any kind.
+   * 0 (or absent) disables it.
+   */
+  energyMin?: number
   stadiumKey: string | null
   /** Other Stadiums that would do instead. */
   stadiumAlternatives?: string[]
@@ -126,6 +131,7 @@ export type PartKind =
   | 'benchTool'
   | 'benchMin'
   | 'handMin'
+  | 'energyMin'
   | 'stadium'
   | 'hand'
   | 'choice'
@@ -272,6 +278,7 @@ export const goalIsEmpty = (goal: FieldGoal): boolean =>
   goal.bench.length === 0 &&
   goal.benchMin === 0 &&
   (goal.handMin ?? 0) === 0 &&
+  (goal.energyMin ?? 0) === 0 &&
   goal.stadiumKey === null &&
   goal.inHand.length === 0
 
@@ -507,6 +514,20 @@ export function scoreBoard(
       kind: 'benchMin',
       label: `${goal.benchMin} or more benched`,
       met: board.bench.length >= goal.benchMin,
+      priority: 1,
+    })
+  }
+
+  if ((goal.energyMin ?? 0) > 0) {
+    const attached = [board.active, ...board.bench].reduce(
+      (sum, pokemon) => sum + (pokemon?.energy.length ?? 0),
+      0,
+    )
+    parts.push({
+      id: 'energyMin',
+      kind: 'energyMin',
+      label: `${goal.energyMin} or more Energy attached`,
+      met: attached >= goal.energyMin!,
       priority: 1,
     })
   }

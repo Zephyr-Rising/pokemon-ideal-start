@@ -100,6 +100,12 @@ export const setHandMin = (goal: FieldGoal, handMin: number): FieldGoal => ({
   handMin: Math.max(0, Math.min(20, handMin)),
 })
 
+/** "At least this many Energy attached" in total; 0 turns it off. */
+export const setEnergyMin = (goal: FieldGoal, energyMin: number): FieldGoal => ({
+  ...goal,
+  energyMin: Math.max(0, Math.min(20, energyMin)),
+})
+
 export const setBenchMin = (goal: FieldGoal, benchMin: number): FieldGoal => ({
   ...goal,
   // Eight is the most the game allows, with Area Zero Underdepths out.

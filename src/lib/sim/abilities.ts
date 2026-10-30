@@ -364,6 +364,7 @@ register('Teal Mask Ogerpon ex', {
   ability: 'Teal Dance',
   // Each Ogerpon has its own; nothing on the card caps it across copies.
   perCopy: true,
+  accelerates: true,
   engine: { fuel: (card) => isBasicEnergy(card) && energyType(card) === '{G}' },
   usable: (state) => holdsEnergy(state, '{G}'),
   apply: (state, target) => {

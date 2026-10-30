@@ -131,6 +131,9 @@ function benchWorthwhile(state: SimState, ctx: ActionContext): (card: DeckCard) 
       // Looking past this turn, a Pokémon that draws from the Active Spot,
       // benched ready to be promoted (Mega Kangaskhan ex).
       (ctx.multiTurn === true && drawsWhileActive(card)) ||
+      // When Energy counts on any Pokémon (a total-Energy condition), each
+      // accelerator is more Energy: a second Teal Mask Ogerpon ex dances too.
+      (ctx.wantsEnergy && ctx.energyTargets.size === 0 && abilityOf(card)?.accelerates === true) ||
       // A Pokémon whose attack searches the deck, ready to step up.
       attackOf(card) !== undefined
     )

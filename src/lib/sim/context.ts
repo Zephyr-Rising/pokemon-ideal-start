@@ -143,14 +143,17 @@ export function buildContext(
   // Any slot happy with any type means any Energy can help, so the type
   // filter is lifted entirely rather than narrowed.
   const needs = energySlots.flatMap((slot) => slot.energy)
+  // A total-Energy count takes any Energy on any Pokémon, so it lifts both
+  // the type filter and the choice of Pokémon.
+  const anyEnergy = (goal.energyMin ?? 0) > 0
   const energyTypes = new Set<string>(
-    needs.includes(null) ? [] : needs.filter((type): type is string => type !== null),
+    needs.includes(null) || anyEnergy ? [] : needs.filter((type): type is string => type !== null),
   )
 
   // Which Pokémon the goal wants Energy on. Attaching anywhere else cannot
   // bring the board closer this turn, so those plays are never generated.
   const energyTargets = new Set(
-    energySlots.flatMap((slot) => acceptedKeys(slot.cardKey, slot.alternatives)),
+    anyEnergy ? [] : energySlots.flatMap((slot) => acceptedKeys(slot.cardKey, slot.alternatives)),
   )
   // ...and their earlier stages, since Energy stays attached through
   // evolution: Psychic for a Dragapult ex belongs on the Dreepy that becomes
@@ -170,7 +173,7 @@ export function buildContext(
   return {
     relevant,
     wantsAnyBench: goal.benchMin > 0,
-    wantsEnergy: energySlots.length > 0,
+    wantsEnergy: energySlots.length > 0 || anyEnergy,
     // Empty means "any type will do".
     energyTypes,
     energyTargets,

@@ -315,6 +315,24 @@ describe('Special Energy', () => {
   })
 })
 
+describe('Energy attached in total', () => {
+  it('counts every Energy on every Pokémon, of any kind', () => {
+    const g = goal({ energyMin: 3 })
+    const mon = (energy: string[]) => ({ cardKey: 'x', energy, tools: [] })
+    const view = (active: string[], bench: string[][]): BoardView => ({
+      active: mon(active),
+      bench: bench.map(mon),
+      stadiumKey: null,
+      hand: [],
+    })
+    const score = (board: BoardView) => scoreBoard(g, board, (k) => k)
+    expect(score(view(['{G}'], [['{P}']])).strict).toBe(false)
+    expect(score(view(['{G}'], [['{P}'], ['{R}']])).strict).toBe(true)
+    expect(score(view([], [])).parts[0].label).toBe('3 or more Energy attached')
+    expect(goalIsEmpty(g)).toBe(false)
+  })
+})
+
 describe('hand size', () => {
   it('is a part of its own, met by any cards at all', () => {
     const g = goal({ handMin: 3 })

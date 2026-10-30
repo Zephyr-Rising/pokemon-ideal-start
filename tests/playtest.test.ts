@@ -55,6 +55,12 @@ describe('playtest basics', () => {
     expect(Math.abs(a.strict - c.strict)).toBeLessThan(0.15)
   })
 
+  it('attaches Energy for a total-Energy condition alone', () => {
+    const result = playtest(cards, goal({ energyMin: 1 }), labelFor(cards), { trials: 100, seed: 3 })
+    // The turn's attachment is there for most hands that hold an Energy.
+    expect(result.strict).toBeGreaterThan(0.5)
+  })
+
   it('treats an empty goal as always reached', () => {
     const result = playtest(cards, emptyGoal(), labelFor(cards), { trials: 50 })
     expect(result.strict).toBe(1)
