@@ -288,15 +288,39 @@ test('reports partial success once a part is less than essential', async ({ page
   await page.getByRole('button', { name: 'Pick Fezandipiti ex' }).click()
   await page.getByRole('button', { name: 'Place in Bench' }).click()
 
-  const priorities = page.getByTestId('priorities')
-  await priorities.getByText('Priorities').click()
-  await priorities
+  // Tapping a card on the board opens its priorities.
+  await page.getByRole('button', { name: 'Set priority for Fezandipiti ex' }).click()
+  const popover = page.getByTestId('priority-popover')
+  await popover
     .getByRole('group', { name: 'Priority of Fezandipiti ex benched' })
     .getByRole('button', { name: 'Nice to have' })
     .click()
+  await popover.getByRole('button', { name: 'Done' }).click()
+  await expect(popover).toHaveCount(0)
+  // The card says so.
+  await expect(
+    page.getByRole('button', { name: 'Set priority for Fezandipiti ex' }).getByText('Nice to have'),
+  ).toBeVisible()
 
   const partial = page.getByTestId('partial-success')
   await expect(partial).toBeVisible({ timeout: 60_000 })
   await expect(partial.getByText('Essential parts')).toBeVisible()
   await expect(partial.getByText('Whole board')).toBeVisible()
+})
+
+test('places an evolved Pokémon in the Active Spot without errors', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await stubCardArt(page)
+  await page.goto('./')
+  await page.getByRole('textbox').first().fill(readFileSync('tests/fixtures/dragapult-munkidori.txt', 'utf8'))
+  for (const tab of ['Turn 1 board', 'Turns to build']) {
+    await page.getByRole('tab', { name: tab }).click()
+    if ((await page.getByRole('button', { name: 'Remove Dragapult ex' }).count()) === 0) {
+      await page.getByRole('button', { name: 'Pick Dragapult ex' }).click()
+      await page.getByRole('button', { name: 'Place in Active spot' }).click()
+    }
+    await expect(page.getByRole('button', { name: 'Remove Dragapult ex' })).toBeVisible()
+  }
+  expect(errors).toEqual([])
 })

@@ -28,6 +28,7 @@ import {
   PRIORITY_LEVELS,
   scoreBoard,
   type FieldGoal,
+  type GoalPart,
   type Priority,
   type SlotGoal,
 } from '../../lib/board/goal'
@@ -98,7 +99,27 @@ export function BoardEditor({ cards, goal, onChange, horizon = 'turn1' }: Props)
   // Click-to-place: pick a card, then pick a zone. Keeps the board usable on a
   // touch screen and by keyboard, where dragging is not an option.
   const [picked, setPicked] = useState<string | null>(null)
+  // The card whose priorities are open, by the id its parts start with.
+  const [selected, setSelected] = useState<string | null>(null)
   const byKey = new Map([...cards, ANY_ENERGY].map((card) => [card.key, card]))
+
+  const parts = scoreBoard(
+    goal,
+    { active: null, bench: [], stadiumKey: null, hand: [] },
+    (key) => byKey.get(key)?.label ?? key,
+  ).parts
+  /** What a card on the board needs to offer its priorities. */
+  const priorityProps = (id: string) => ({
+    // A card is its parts: the Pokémon, its Energy and Tools; or the Stadium;
+    // or a card kept in hand.
+    parts: parts.filter((part) => part.id === id || part.id.startsWith(`${id}:`)),
+    open: selected === id,
+    // Tapping a card picks priorities only when no card from the deck is
+    // waiting to be placed; then a tap attaches, as before.
+    onToggle: picked === null ? () => setSelected(selected === id ? null : id) : undefined,
+    onPriority: (partId: string, level: Priority) =>
+      onChange(setPartPriority(goal, partId, level)),
+  })
 
   /**
    * The Energy and Tools the goal asks for on one Pokémon, as cards to tuck
@@ -205,6 +226,7 @@ export function BoardEditor({ cards, goal, onChange, horizon = 'turn1' }: Props)
                       card={byKey.get(goal.active.cardKey)}
                       attached={attachedTo(goal.active)}
                       onRemove={() => onChange(clearActive(goal))}
+                      {...priorityProps(goal.active.id)}
                     />
                   </SlotDrop>
                 ) : (
@@ -247,6 +269,7 @@ export function BoardEditor({ cards, goal, onChange, horizon = 'turn1' }: Props)
                         card={byKey.get(slot.cardKey)}
                         attached={attachedTo(slot)}
                         onRemove={() => onChange(removeBench(goal, slot.id))}
+                        {...priorityProps(slot.id)}
                       />
                     </SlotDrop>
                   ))}
@@ -270,6 +293,7 @@ export function BoardEditor({ cards, goal, onChange, horizon = 'turn1' }: Props)
                   <SlotCard
                     card={byKey.get(goal.stadiumKey)}
                     onRemove={() => onChange(setStadium(goal, null))}
+                    {...priorityProps('stadium')}
                   />
                 ) : (
                   <Empty label="Stadium" />
@@ -289,6 +313,7 @@ export function BoardEditor({ cards, goal, onChange, horizon = 'turn1' }: Props)
                       card={byKey.get(want.cardKey)}
                       count={want.count}
                       onRemove={() => onChange(removeHand(goal, want.id))}
+                      {...priorityProps(want.id)}
                     />
                   ))}
                   {goal.inHand.length === 0 && <Empty label="Hand" />}
@@ -297,8 +322,6 @@ export function BoardEditor({ cards, goal, onChange, horizon = 'turn1' }: Props)
             </div>
           </div>
         </div>
-
-        <Priorities goal={goal} labelFor={(key) => byKey.get(key)?.label ?? key} onChange={onChange} />
 
         <Palette cards={cards} picked={picked} onPick={setPicked} />
       </section>
@@ -433,6 +456,10 @@ function SlotCard({
   count,
   attached,
   onRemove,
+  parts,
+  open,
+  onToggle,
+  onPriority,
 }: {
   slot?: SlotGoal
   card: DeckCard | undefined
@@ -440,12 +467,44 @@ function SlotCard({
   /** Energy and Tools on a Pokémon in play; absent for other zones. */
   attached?: AttachedCard[]
   onRemove: () => void
+  /** The parts of the board this card stands for, with their priorities. */
+  parts: GoalPart[]
+  /** Its priority options are showing. */
+  open: boolean
+  /** Tapping the card opens or closes them; absent while placing a card. */
+  onToggle?: () => void
+  onPriority: (partId: string, level: Priority) => void
 }) {
   const src = card ? cardImageUrl(card) : null
   const name = card?.label ?? 'Unknown'
+  // The card's own part (the Pokémon, the Stadium, the card in hand) sets
+  // the badge; its Energy and Tools have their own rows when opened.
+  const own = parts[0]
+  const badge = own && own.priority > 1 ? PRIORITY_LEVELS[own.priority - 1].label : null
 
   const face = (
-    <div className="relative aspect-[245/342] overflow-hidden rounded-md border border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-800">
+    <div
+      className={[
+        'relative aspect-[245/342] overflow-hidden rounded-md border bg-slate-100 dark:bg-slate-800',
+        open ? 'border-sky-500 ring-2 ring-sky-400/60' : 'border-slate-200 dark:border-slate-700',
+        onToggle ? 'cursor-pointer' : '',
+      ].join(' ')}
+      role={onToggle ? 'button' : undefined}
+      tabIndex={onToggle ? 0 : undefined}
+      aria-label={onToggle ? `Set priority for ${name}` : undefined}
+      aria-expanded={onToggle ? open : undefined}
+      onClick={onToggle}
+      onKeyDown={
+        onToggle
+          ? (event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                onToggle()
+              }
+            }
+          : undefined
+      }
+    >
       {src ? (
         <img src={src} alt={name} loading="lazy" className="h-full w-full object-cover" />
       ) : (
@@ -455,7 +514,11 @@ function SlotCard({
       )}
       <button
         type="button"
-        onClick={onRemove}
+        onClick={(event) => {
+          // Not also a tap on the card underneath.
+          event.stopPropagation()
+          onRemove()
+        }}
         aria-label={`Remove ${name}`}
         className="absolute top-0.5 right-0.5 h-5 w-5 rounded-full bg-slate-900/70 text-xs leading-none text-white hover:bg-rose-600"
       >
@@ -466,11 +529,16 @@ function SlotCard({
           ×{count}
         </span>
       )}
+      {badge && (
+        <span className="absolute inset-x-0 bottom-0 bg-amber-500/90 text-center text-[9px] font-semibold text-white">
+          {badge}
+        </span>
+      )}
     </div>
   )
 
   return (
-    <figure className="w-[84px] space-y-1">
+    <figure className="relative w-[84px] space-y-1">
       {slot ? (
         <WithAttached attached={attached ?? []} peek={14}>
           {face}
@@ -479,6 +547,9 @@ function SlotCard({
         face
       )}
       {!slot && <figcaption className="truncate text-center text-[10px]">{name}</figcaption>}
+      {open && parts.length > 0 && (
+        <PriorityPopover name={name} parts={parts} onPriority={onPriority} onClose={onToggle} />
+      )}
     </figure>
   )
 }
@@ -578,59 +649,73 @@ function PaletteCard({
 }
 
 /**
- * How much each part of the board matters. A game that has every part at a
- * level, and every more important one, counts as a partial success at that
- * level, so a board that is nearly right is not scored the same as a miss.
+ * The priority options for one card on the board, opened by tapping it: how
+ * much the card matters, and its Energy and Tools each on their own row. A
+ * game with every part at a level, and every more important one, counts as a
+ * partial success at that level.
  */
-function Priorities({
-  goal,
-  labelFor,
-  onChange,
+function PriorityPopover({
+  name,
+  parts,
+  onPriority,
+  onClose,
 }: {
-  goal: FieldGoal
-  labelFor: (cardKey: string) => string
-  onChange: (goal: FieldGoal) => void
+  name: string
+  parts: GoalPart[]
+  onPriority: (partId: string, level: Priority) => void
+  onClose?: () => void
 }) {
-  const parts = scoreBoard(goal, { active: null, bench: [], stadiumKey: null, hand: [] }, labelFor).parts
-  // With a single part there is nothing to rank.
-  if (parts.length < 2) return null
-
   return (
-    <details
-      data-testid="priorities"
-      className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm dark:border-slate-800 dark:bg-slate-900"
+    <div
+      data-testid="priority-popover"
+      role="dialog"
+      aria-label={`Priorities for ${name}`}
+      // Taps inside are choices, not taps on the board around it.
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') onClose?.()
+      }}
+      className="absolute top-full left-0 z-30 mt-1 w-64 space-y-2 rounded-lg border border-slate-200 bg-white p-3 text-xs shadow-lg dark:border-slate-700 dark:bg-slate-900"
     >
-      <summary className="cursor-pointer font-medium">
-        Priorities
-        <span className="ml-2 text-xs font-normal text-slate-500">
-          which parts a board can do without and still be a partial success
-        </span>
-      </summary>
-      <ul className="mt-3 space-y-1.5">
-        {parts.map((part) => (
-          <li key={part.id} className="flex flex-wrap items-center justify-between gap-2">
-            <span className="min-w-0 truncate">{part.label}</span>
-            <span className="flex shrink-0 gap-1" role="group" aria-label={`Priority of ${part.label}`}>
-              {PRIORITY_LEVELS.map(({ level, label }) => (
-                <button
-                  key={level}
-                  type="button"
-                  aria-pressed={part.priority === level}
-                  onClick={() => onChange(setPartPriority(goal, part.id, level as Priority))}
-                  className={[
-                    'rounded-md border px-2 py-0.5 text-xs',
-                    part.priority === level
-                      ? 'border-sky-500 bg-sky-50 font-medium text-sky-800 dark:bg-sky-950/40 dark:text-sky-200'
-                      : 'border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800',
-                  ].join(' ')}
-                >
-                  {label}
-                </button>
-              ))}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </details>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="font-semibold">Priority</span>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+        >
+          Done
+        </button>
+      </div>
+      {parts.map((part) => (
+        <div key={part.id} className="space-y-1">
+          <div className="truncate text-slate-600 dark:text-slate-300" title={part.label}>
+            {part.label}
+          </div>
+          <div className="flex gap-1" role="group" aria-label={`Priority of ${part.label}`}>
+            {PRIORITY_LEVELS.map(({ level, label }) => (
+              <button
+                key={level}
+                type="button"
+                aria-pressed={part.priority === level}
+                onClick={() => onPriority(part.id, level)}
+                className={[
+                  'flex-1 rounded-md border px-1.5 py-0.5',
+                  part.priority === level
+                    ? 'border-sky-500 bg-sky-50 font-medium text-sky-800 dark:bg-sky-950/40 dark:text-sky-200'
+                    : 'border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800',
+                ].join(' ')}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+      <p className="text-slate-500">
+        A game that has every part at a level, and every more important one, counts as a partial
+        success at that level.
+      </p>
+    </div>
   )
 }
