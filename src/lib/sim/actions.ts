@@ -10,7 +10,7 @@ import {
 } from './abilities'
 import { attack, attackAvailable, attackOf, costPaid } from './attacks'
 import {
-  attachSearches,
+  attachTriggers,
   lookupEffect,
   onAttachFromHand,
   worthSwitching,
@@ -149,6 +149,9 @@ function benchRoom(state: SimState, ctx: ActionContext): { spare: number } {
   return { spare: free - claimed }
 }
 
+/** Does this Energy's attach trigger depend on which Pokémon it goes on? */
+const isPokemonSpecific = (card: DeckCard): boolean => nameOf(card) === norm('Telepathic Psychic Energy')
+
 /** Is the Active's searching attack usable but for its Energy cost? */
 function attackNeedsEnergy(state: SimState): boolean {
   const active = state.active
@@ -223,7 +226,9 @@ export function legalActions(state: SimState, ctx: ActionContext): Action[] {
   // carried to where the goal wants it by Energy Switch.
   const payingRetreat = needsRetreatEnergy(state, ctx)
   const searchesOnAttach = state.hand.some(
-    (card) => isEnergy(card) && targets(state).some((t) => attachSearches(state, card, slotAt(state, t)!.card, ctx)),
+    (card) =>
+      isEnergy(card) &&
+      targets(state).some((t) => attachTriggers(state, card, slotAt(state, t)!.card, ctx)),
   )
   if (
     !state.usedEnergy &&
@@ -237,6 +242,8 @@ export function legalActions(state: SimState, ctx: ActionContext): Action[] {
       // Two benched Pokémon that are the same card carrying the same Energy
       // give the same board either way, so only one is tried.
       const seenSlot = new Set<string>()
+      // Energy already offered somewhere just for a trigger that ignores where.
+      const anywhere = new Set<string>()
       for (const target of targets(state)) {
         const slot = slotAt(state, target)!
         const same = `${target === ACTIVE_TARGET ? 'A' : 'B'}${slot.card.key}+${slot.energy.length}`
@@ -250,10 +257,16 @@ export function legalActions(state: SimState, ctx: ActionContext): Action[] {
         const forRetreat = payingRetreat && target === ACTIVE_TARGET
         // Or onto an Active whose searching attack still needs it paid.
         const forAttack = target === ACTIVE_TARGET && attackNeedsEnergy(state)
-        // Or wherever the attachment itself searches: Telepathic Psychic
-        // Energy on a Psychic Pokémon benches Basic Psychic Pokémon.
-        const forSearch = attachSearches(state, card, slot.card, ctx)
-        if (forGoal || forRetreat || forAttack || forSearch) {
+        // Or wherever the attachment itself does something: Telepathic Psychic
+        // Energy on a Psychic Pokémon benches Basic Psychic Pokémon; Enriching
+        // Energy draws 4 on any. When that is the only reason, one Pokémon is
+        // offered for an Energy whose trigger does not care which.
+        let forTrigger = attachTriggers(state, card, slot.card, ctx)
+        if (forTrigger && !(forGoal || forRetreat || forAttack) && anywhere.has(card.key)) {
+          forTrigger = false
+        }
+        if (forTrigger && !isPokemonSpecific(card)) anywhere.add(card.key)
+        if (forGoal || forRetreat || forAttack || forTrigger) {
           actions.push({ kind: 'attachEnergy', handIndex, target })
         }
       }

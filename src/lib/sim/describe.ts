@@ -87,6 +87,19 @@ function evolutions(before: SimState, after: SimState): string[] {
   return out
 }
 
+/** The benched names left once Pokémon that evolved in place are taken out. */
+function withoutEvolved(benched: string[], before: SimState, after: SimState): string[] {
+  const left = [...benched]
+  before.bench.forEach((slot, i) => {
+    const now = after.bench[i]
+    if (now && now.card.key !== slot.card.key && now.card.card?.prev) {
+      const at = left.indexOf(label(now.card))
+      if (at >= 0) left.splice(at, 1)
+    }
+  })
+  return left
+}
+
 /** "using Alakazam's Psychic Draw, drawing 3". */
 function onEvolveUse(pokemon: DeckCard, count: number): string {
   return `using ${label(pokemon)}'s ${abilityOf(pokemon)?.ability ?? 'Ability'}, drawing ${count}`
@@ -164,8 +177,10 @@ export function describeStep(before: SimState, after: SimState, action: Action):
       const target =
         action.target === ACTIVE_TARGET ? after.active! : after.bench[action.target]
       const attached = `Attach ${label(card)} to ${label(target.card)}`
-      // Telepathic Psychic Energy benches as it goes on.
-      return benched.length > 0 ? `${attached} — benching ${list(benched)}` : attached
+      // Telepathic Psychic Energy benches as it goes on; Enriching draws.
+      if (benched.length > 0) return `${attached} — benching ${list(benched)}`
+      if (drawn.length > 0) return `${attached} — drawing ${drawn.length}`
+      return attached
     }
 
     case 'attachTool': {
@@ -182,7 +197,9 @@ export function describeStep(before: SimState, after: SimState, action: Action):
     case 'playSupporter': {
       const card = before.hand[action.handIndex]
       const outcome: string[] = []
-      if (benched.length > 0) outcome.push(`benching ${list(benched)}`)
+      // A Pokémon evolved in place (Rare Candy) is not a new arrival.
+      const arrived = withoutEvolved(benched, before, after)
+      if (arrived.length > 0) outcome.push(`benching ${list(arrived)}`)
 
       // A Pokémon evolved by the card (Rare Candy) may draw as it goes on:
       // Psychic Draw, not the card itself, is where those cards came from.

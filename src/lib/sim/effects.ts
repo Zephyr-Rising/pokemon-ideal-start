@@ -176,6 +176,8 @@ function isOut(card: DeckCard, state: SimState, ctx: EffectContext): boolean {
   const later = ctx.multiTurn === true
   if (card.tags.includes('supporter')) return isImplemented(card) && (later || !state.usedSupporter)
   if (card.tags.includes('item')) return isImplemented(card)
+  // An Energy that searches or draws as it is attached.
+  if (card.tags.includes('energy') && triggersOnAttach(card)) return true
   if (card.tags.includes('stadium')) {
     const name = nameOf(card)
     const helps =
@@ -620,17 +622,25 @@ const TELEPATHIC = norm('Telepathic Psychic Energy')
 const isPokemonOfType = (card: DeckCard, type: string) =>
   card.tags.includes('pokemon') && (card.card?.type ?? '').includes(type)
 
+const ENRICHING = norm('Enriching Energy')
+
+/** An Energy that does something as it is attached from hand. */
+export const triggersOnAttach = (energy: DeckCard): boolean =>
+  nameOf(energy) === TELEPATHIC || nameOf(energy) === ENRICHING
+
 /**
- * Would attaching this Energy from hand to this Pokémon set off a search?
- * Telepathic Psychic Energy does, onto a Psychic Pokémon — and is only worth
- * it while a Basic Psychic the goal can use is in the deck, with room for it.
+ * Would attaching this Energy from hand to this Pokémon set something off
+ * worth the attachment? Enriching Energy draws 4 on any Pokémon, while the deck
+ * has cards. Telepathic Psychic Energy searches onto a Psychic Pokémon, while
+ * a Basic Psychic the goal can use is in the deck, with room for it.
  */
-export function attachSearches(
+export function attachTriggers(
   state: SimState,
   energy: DeckCard,
   holder: DeckCard,
   ctx: EffectContext,
 ): boolean {
+  if (nameOf(energy) === ENRICHING) return state.deck.length > 0
   if (nameOf(energy) !== TELEPATHIC || !isPokemonOfType(holder, '{P}')) return false
   if (state.bench.length >= benchCap(state)) return false
   return choices(state, state.deck, (card) => isBasicPokemon(card) && isPokemonOfType(card, '{P}'), ctx).length > 0
@@ -649,6 +659,13 @@ export function onAttachFromHand(
   holder: DeckCard,
   ctx: EffectContext,
 ): SimState[] {
+  // Enriching Energy: "When you attach this card from your hand to a Pokémon,
+  // draw 4 cards."
+  if (nameOf(energy) === ENRICHING) {
+    const next = cloneState(state)
+    next.hand.push(...next.deck.splice(0, 4))
+    return [next]
+  }
   if (nameOf(energy) !== TELEPATHIC || !isPokemonOfType(holder, '{P}')) return [state]
   const psychic = (card: DeckCard) => isBasicPokemon(card) && isPokemonOfType(card, '{P}')
   const shuffle = (next: SimState) => {

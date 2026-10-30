@@ -4,6 +4,8 @@ import { emptyGoal, type FieldGoal, type SlotGoal } from '../src/lib/board/goal'
 import type { ActionContext } from '../src/lib/sim/actions'
 import { buildContext } from '../src/lib/sim/context'
 import { searchBestLine } from '../src/lib/sim/search'
+import { legalActions } from '../src/lib/sim/actions'
+import { useAbility } from '../src/lib/sim/abilities'
 import { inPlay, type SimState } from '../src/lib/sim/state'
 import type { CardRecord, DeckCard } from '../src/lib/types'
 
@@ -354,5 +356,49 @@ describe('cards in hand at the end of the turn', () => {
     const result = run(s, goal({ active: slot('a', 'dreepy'), handMin: 6 }))
     expect(result.score.strict).toBe(true)
     expect(result.finalState.hand.length).toBeGreaterThanOrEqual(6)
+  })
+})
+
+describe('Enriching Energy', () => {
+  const enriching = card('enriching', ['energy', 'special-energy'], {
+    name: 'Enriching Energy',
+    effect:
+      'As long as this card is attached to a Pokémon, it provides {C} Energy. When you attach this card from your hand to a Pokémon, draw 4 cards.',
+  })
+
+  it('draws 4 when attached, and is attached for the draw alone', () => {
+    // The goal needs a Pokémon that is fifth from the top: only the draw finds it.
+    const s = state({
+      active: inPlay(basic('dreepy')),
+      hand: [enriching],
+      deck: [basic('a'), basic('b'), basic('c'), basic('target'), basic('e')],
+    })
+    const result = run(s, goal({ bench: [slot('t', 'target')] }))
+    expect(result.score.strict).toBe(true)
+    expect(result.steps[0]).toBe('Attach enriching to dreepy — drawing 4')
+  })
+
+  it('is offered on one Pokémon only when the draw is the only reason', () => {
+    const s = state({
+      active: inPlay(basic('x')),
+      bench: [inPlay(basic('y')), inPlay(basic('z'))],
+      hand: [enriching],
+      deck: [basic('a'), basic('b')],
+    })
+    const ctx = buildContext(goal({ bench: [slot('t', 'nothing-here')] }), () => 0.5)
+    const attaches = legalActions(s, ctx).filter((a) => a.kind === 'attachEnergy')
+    expect(attaches).toHaveLength(1)
+  })
+
+  it('goes back into the deck with Dudunsparce, to be drawn again', () => {
+    const dudunsparce = card('dudunsparce', ['pokemon', 'stage1'], { name: 'Dudunsparce', prev: 'Dunsparce' })
+    const s = state({
+      active: inPlay(basic('x')),
+      bench: [{ ...inPlay(dudunsparce), energy: [enriching] }],
+      deck: [basic('a'), basic('b'), basic('c'), basic('d')],
+    })
+    const [after] = useAbility(s, 0, buildContext(goal({}), () => 0.5))
+    expect(after.deck.map((c) => c.key)).toContain('enriching')
+    expect(after.deck.map((c) => c.key)).toContain('dudunsparce')
   })
 })
