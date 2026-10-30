@@ -195,6 +195,53 @@ function foldChoices(parts: GoalPart[], goal: FieldGoal): GoalPart[] {
   return [...parts.filter((part) => !members.has(part.id)), ...folded]
 }
 
+/** Where one Energy's own priority is kept. */
+export const energyPriorityId = (slotId: string, index: number): string =>
+  `${slotId}:energy:${index}`
+
+/**
+ * One Energy's priority: its own if set, else the priority the Pokémon's
+ * Energy had as a whole (boards from before Energy had its own), else
+ * essential.
+ */
+export function energyPriority(goal: FieldGoal, slot: SlotGoal, index: number): Priority {
+  return (
+    goal.priorities?.[energyPriorityId(slot.id, index)] ??
+    goal.priorities?.[`${slot.id}:energy`] ??
+    1
+  )
+}
+
+/**
+ * A Pokémon's Energy as board parts, one per priority level its Energy uses.
+ * Each level's part asks for every Energy at that level or more important, so
+ * "2 Grass Energy" essential and a third nice to have reads as "2 Grass Energy
+ * on X" (essential) and "3 Grass Energy on X" (nice to have). The most
+ * important level keeps the plain `:energy` id, which choices refer to.
+ */
+function energyParts(
+  goal: FieldGoal,
+  slot: SlotGoal,
+  kind: 'activeEnergy' | 'benchEnergy',
+  where: string,
+  labelFor: (cardKey: string) => string,
+  met: (subset: SlotGoal) => boolean,
+): GoalPart[] {
+  if (slot.energy.length === 0) return []
+  const levels = slot.energy.map((_, i) => energyPriority(goal, slot, i))
+  const used = [...new Set(levels)].sort((a, b) => a - b)
+  return used.map((level, n) => {
+    const subset = { ...slot, energy: slot.energy.filter((_, i) => levels[i] <= level) }
+    return {
+      id: n === 0 ? `${slot.id}:energy` : `${slot.id}:energy@${level}`,
+      kind,
+      label: `${energyPhrase(subset, labelFor)} on ${where}`,
+      met: met(subset),
+      priority: level,
+    }
+  })
+}
+
 /** The priority levels a goal actually uses, most important first. */
 export function usedPriorities(goal: FieldGoal): Priority[] {
   const levels = new Set<Priority>()
@@ -391,16 +438,12 @@ export function scoreBoard(
       met: matches,
       priority: 1,
     })
-    if (goal.active.energy.length > 0) {
-      parts.push({
-        id: `${goal.active.id}:energy`,
-        kind: 'activeEnergy',
-        label: `${energyPhrase(goal.active, labelFor)} on the Active`,
+    parts.push(
+      ...energyParts(goal, goal.active, 'activeEnergy', 'the Active', labelFor, (subset) =>
         // Energy only counts on the Pokémon the goal actually asked for.
-        met: matches && energyMet(board.active ?? undefined, goal.active),
-        priority: 1,
-      })
-    }
+        matches && energyMet(board.active ?? undefined, subset),
+      ),
+    )
     for (const toolKey of goal.active.tools) {
       parts.push({
         id: `${goal.active.id}:tool:${toolKey}`,
@@ -425,15 +468,11 @@ export function scoreBoard(
       met: pokemon !== undefined,
       priority: 1,
     })
-    if (slot.energy.length > 0) {
-      parts.push({
-        id: `${slot.id}:energy`,
-        kind: 'benchEnergy',
-        label: `${energyPhrase(slot, labelFor)} on ${name}`,
-        met: energyMet(pokemon, slot),
-        priority: 1,
-      })
-    }
+    parts.push(
+      ...energyParts(goal, slot, 'benchEnergy', name, labelFor, (subset) =>
+        energyMet(pokemon, subset),
+      ),
+    )
     for (const toolKey of slot.tools) {
       parts.push({
         id: `${slot.id}:tool:${toolKey}`,
@@ -492,7 +531,12 @@ export function scoreBoard(
     })
   }
 
-  for (const part of parts) part.priority = goal.priorities?.[part.id] ?? 1
+  // Energy parts carry their level already; everything else is looked up.
+  for (const part of parts) {
+    if (part.kind !== 'activeEnergy' && part.kind !== 'benchEnergy') {
+      part.priority = goal.priorities?.[part.id] ?? 1
+    }
+  }
   // Fold the parts of each either/or choice into one part for the choice.
   const folded = foldChoices(parts, goal)
   parts.splice(0, parts.length, ...folded)

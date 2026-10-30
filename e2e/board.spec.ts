@@ -407,3 +407,26 @@ test('a board change mid-run starts the new run straight away', async ({ page })
   await expect(progress.getByText(/200 games… 0 done/)).toBeVisible({ timeout: 5_000 })
   await expect(progress.getByText(/200 games… [1-9]\d* done/)).toBeVisible({ timeout: 10_000 })
 })
+
+test('sets the priority of one Energy on a Pokémon', async ({ page }) => {
+  await openBoard(page)
+  await page.getByRole('button', { name: 'Pick Teal Mask Ogerpon ex' }).click()
+  await page.getByRole('button', { name: 'Place in Active spot' }).click()
+  for (let i = 0; i < 2; i++) {
+    await page.getByRole('button', { name: 'Pick Grass Energy' }).click()
+    await page.getByRole('button', { name: 'Attach to Teal Mask Ogerpon ex' }).click()
+  }
+  await page.getByRole('button', { name: 'Set priority for Teal Mask Ogerpon ex' }).click()
+  await page
+    .getByTestId('priority-popover')
+    .getByRole('group', { name: 'Priority of Grass Energy 2' })
+    .getByRole('button', { name: 'Nice to have' })
+    .click()
+  await page.getByTestId('priority-popover').getByRole('button', { name: 'Done' }).click()
+
+  // One Energy is essential, both together are only nice to have.
+  const parts = page.getByTestId('board-parts')
+  await expect(parts.getByText('Grass Energy on the Active').first()).toBeVisible({ timeout: 60_000 })
+  await expect(parts.getByText('2 Grass Energy on the Active').first()).toBeVisible()
+  await expect(page.getByTestId('partial-success')).toBeVisible()
+})

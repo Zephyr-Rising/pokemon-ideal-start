@@ -43,10 +43,22 @@ export const removeBench = (goal: FieldGoal, id: string): FieldGoal => ({
 /** Change a slot's Energy requirement, whether it is the Active or a bench slot. */
 /** Take one Energy off a slot, by its position in the slot's list. */
 export function removeSlotEnergy(goal: FieldGoal, id: string, index: number): FieldGoal {
-  return mapSlot(goal, id, (slot) => ({
+  const next = mapSlot(goal, id, (slot) => ({
     ...slot,
     energy: slot.energy.filter((_, i) => i !== index),
   }))
+  // Each Energy's own priority moves down with it.
+  const priorities = { ...goal.priorities }
+  const prefix = `${id}:energy:`
+  const shifted: Record<string, Priority> = {}
+  for (const [key, level] of Object.entries(priorities)) {
+    if (!key.startsWith(prefix)) continue
+    delete priorities[key]
+    const at = Number(key.slice(prefix.length))
+    if (at < index) shifted[key] = level
+    if (at > index) shifted[`${prefix}${at - 1}`] = level
+  }
+  return { ...next, priorities: { ...priorities, ...shifted } }
 }
 
 /** Map a slot id onto its slot, wherever it sits. */

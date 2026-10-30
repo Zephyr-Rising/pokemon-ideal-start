@@ -30,6 +30,9 @@ import type { DropTarget, DroppedCard } from '../../lib/board/edit'
 import { slotTarget } from '../../lib/board/edit'
 import {
   PRIORITY_LEVELS,
+  energyPhrase,
+  energyPriority,
+  energyPriorityId,
   scoreBoard,
   type FieldGoal,
   type GoalPart,
@@ -56,6 +59,9 @@ interface Props {
  * type. It is not in the simulator's card pool, so its art is linked directly.
  */
 const ANY_ENERGY_KEY = 'any-energy'
+
+/** How an attached Energy below essential is marked on its edge. */
+const EDGE_PRIORITY: Record<Priority, string | null> = { 1: null, 2: 'Important', 3: 'Nice' }
 
 const ANY_ENERGY: DeckCard = {
   key: ANY_ENERGY_KEY,
@@ -131,10 +137,37 @@ export function BoardEditor({ cards, goal, onChange, horizon = 'turn1' }: Props)
       return { ...g, options }
     })
   /** What a card on the board needs to offer its priorities. */
+  /**
+   * The rows a card's popover offers: the card itself and its Tools as board
+   * parts, and each Energy on its own — Energy is scored per priority level,
+   * but set one Energy at a time.
+   */
+  const cardParts = (id: string): GoalPart[] => {
+    const own = parts.filter(
+      (part) =>
+        (part.id === id || part.id.startsWith(`${id}:`)) &&
+        part.kind !== 'activeEnergy' &&
+        part.kind !== 'benchEnergy',
+    )
+    const slot = [...(goal.active ? [goal.active] : []), ...goal.bench].find((s) => s.id === id)
+    if (!slot) return own
+    const energy = slot.energy.map(
+      (kind, index): GoalPart => ({
+        id: energyPriorityId(slot.id, index),
+        kind: slot === goal.active ? 'activeEnergy' : 'benchEnergy',
+        label: `${energyPhrase({ energy: [kind] }, labelFor)} ${index + 1}`,
+        met: false,
+        priority: energyPriority(goal, slot, index),
+      }),
+    )
+    // The Pokémon first, then its Energy, then its Tools.
+    return [own[0], ...energy, ...own.slice(1)].filter((part): part is GoalPart => part !== undefined)
+  }
+
   const priorityProps = (id: string) => ({
     // A card is its parts: the Pokémon, its Energy and Tools; or the Stadium;
     // or a card kept in hand.
-    parts: parts.filter((part) => part.id === id || part.id.startsWith(`${id}:`)),
+    parts: cardParts(id),
     open: grouping === null && selected === id,
     // While building an either/or, a tap puts the card in the open option.
     // Otherwise it opens the card's priorities — only when no card from the
@@ -207,8 +240,12 @@ export function BoardEditor({ cards, goal, onChange, horizon = 'turn1' }: Props)
         id: `energy-${index}`,
         label,
         src: record ? recordImageUrl(record) : null,
-        // Luminous Energy's art says "Luminous", so the edge says what it means.
-        badge: type ? undefined : 'Any',
+        // Luminous Energy's art says "Luminous", so the edge says what it
+        // means; and an Energy below essential says so too.
+        badge:
+          [type ? null : 'Any', EDGE_PRIORITY[energyPriority(goal, slot, index)]]
+            .filter(Boolean)
+            .join(' · ') || undefined,
         removeLabel: `Remove one ${label} from ${name}`,
         onRemove: () => onChange(removeSlotEnergy(goal, slot.id, index)),
       }

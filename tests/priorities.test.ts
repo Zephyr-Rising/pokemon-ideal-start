@@ -3,8 +3,15 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
-import { setPartPriority } from '../src/lib/board/edit'
-import { emptyGoal, scoreBoard, usedPriorities, type BoardView, type FieldGoal } from '../src/lib/board/goal'
+import { removeSlotEnergy, setPartPriority } from '../src/lib/board/edit'
+import {
+  emptyGoal,
+  energyPriorityId,
+  scoreBoard,
+  usedPriorities,
+  type BoardView,
+  type FieldGoal,
+} from '../src/lib/board/goal'
 import { resolveDeck } from '../src/lib/resolve-cards'
 import { playtest } from '../src/lib/sim/playtest'
 import { boardRequirements, prizeLocks } from '../src/lib/sim/prizes'
@@ -85,4 +92,42 @@ describe('priorities and the prizes', () => {
     expect(whole.reached).toBeCloseTo(result.reached, 10)
     expect(essential.reached).toBeGreaterThanOrEqual(whole.reached)
   }, 120_000)
+})
+
+describe('priorities for individual Energy', () => {
+  // Three Grass on Ogerpon: two essential, the third nice to have.
+  let g: FieldGoal = {
+    ...emptyGoal(),
+    active: { id: 'a', cardKey: 'oger', energy: ['{G}', '{G}', '{G}'], tools: [] },
+  }
+  g = setPartPriority(g, energyPriorityId('a', 2), 3)
+  const withEnergy = (n: number): BoardView => ({
+    active: { cardKey: 'oger', energy: Array.from({ length: n }, () => '{G}'), tools: [] },
+    bench: [],
+    stadiumKey: null,
+    hand: [],
+  })
+  const score = (n: number) => scoreBoard(g, withEnergy(n), (k) => k)
+
+  it('scores each level cumulatively', () => {
+    const parts = score(0).parts.filter((p) => p.kind === 'activeEnergy')
+    expect(parts.map((p) => [p.label, p.priority])).toEqual([
+      ['2 Grass Energy on the Active', 1],
+      ['3 Grass Energy on the Active', 3],
+    ])
+    expect(score(1).tier).toBe(0)
+    expect(score(2).tier).toBe(2)
+    expect(score(3).tier).toBe(3)
+  })
+
+  it('keeps an older whole-Energy priority as the default', () => {
+    const old = { ...emptyGoal(), active: { id: 'a', cardKey: 'oger', energy: ['{G}'], tools: [] }, priorities: { 'a:energy': 2 as const } }
+    expect(scoreBoard(old, withEnergy(0), (k) => k).parts.find((p) => p.kind === 'activeEnergy')!.priority).toBe(2)
+  })
+
+  it('moves each Energy\'s priority down when an earlier one is removed', () => {
+    const after = removeSlotEnergy(g, 'a', 0)
+    expect(after.priorities?.[energyPriorityId('a', 1)]).toBe(3)
+    expect(after.priorities?.[energyPriorityId('a', 2)]).toBeUndefined()
+  })
 })

@@ -1,6 +1,7 @@
 import {
   acceptedKeys,
   choiceMembers,
+  energyPriority,
   scoreBoard,
   type FieldGoal,
   type Priority,
@@ -112,9 +113,12 @@ export function boardRequirements(
       prev = earlier?.card?.prev ? norm(earlier.card.prev) : null
     }
   }
+  // Energy counts one by one, each at its own priority.
+  const energyCounts = (slot: (typeof slots)[number], index: number) =>
+    !members.has(`${slot.id}:energy`) && energyPriority(goal, slot, index) <= upTo
   for (const slot of slots) {
-    if (!counts(`${slot.id}:energy`)) continue
-    for (const kind of slot.energy) {
+    for (const [index, kind] of slot.energy.entries()) {
+      if (!energyCounts(slot, index)) continue
       if (kind === null) continue
       const special = byKey.get(kind)
       need(`energy:${kind}`, () => ({
@@ -135,9 +139,10 @@ export function boardRequirements(
   }
 
   // All the Energy the board asks for, of any kind.
-  const totalEnergy = slots
-    .filter((slot) => counts(`${slot.id}:energy`))
-    .reduce((sum, slot) => sum + slot.energy.length, 0)
+  const totalEnergy = slots.reduce(
+    (sum, slot) => sum + slot.energy.filter((_, index) => energyCounts(slot, index)).length,
+    0,
+  )
   if (totalEnergy > 0) {
     need('energy:total', () => ({ label: 'Energy', matches: (card) => card.tags.includes('energy') }), totalEnergy)
   }
