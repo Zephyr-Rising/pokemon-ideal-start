@@ -1,6 +1,6 @@
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
-import { engineKeeps, engineWants, onEvolve } from './abilities'
+import { abilityOf, engineKeeps, engineWants, onEvolve } from './abilities'
 import { attackOf } from './attacks'
 import { distinctCards, supporterChoices, takeFromTop, topOf } from './deck-look'
 import {
@@ -8,6 +8,7 @@ import {
   cardName,
   nameOf,
   cloneState,
+  energyKind,
   energyType,
   evolveSlot,
   fairShuffle,
@@ -15,6 +16,7 @@ import {
   isBasicPokemon,
   isEnergy,
   shufflesAfter,
+  type InPlay,
   type SimState,
 } from './state'
 
@@ -182,11 +184,16 @@ export function payDiscard(
   if (state.hand.length < count) return null
   const next = cloneState(state)
   const engine = engineKeeps(state)
+  const recovers = recoverable(state)
   const ranked = next.hand
     .map((card, index) => ({
       card,
       index,
-      keep: Math.max(keepRank(card, ctx), engine.has(index) ? 1 : 0),
+      keep: recovers(card)
+        ? // An accelerator can put it straight back: pitch it before anything
+          // the goal needs, but after outright junk.
+          0.5
+        : Math.max(keepRank(card, ctx), engine.has(index) ? 1 : 0),
     }))
     .sort((a, b) => a.keep - b.keep || a.index - b.index)
   for (const entry of ranked.slice(0, count)) next.discard.push(entry.card)
@@ -336,6 +343,31 @@ registerEffect('Bug Catching Set', (state, ctx) => {
   return out
 })
 
+// "Search your deck for a Trainer card, reveal it, and put it into your hand.
+// Then, shuffle your deck." Petrel is itself the turn's Supporter, so another
+// Supporter is only worth fetching if the goal wants it in hand; otherwise the
+// choice is a Trainer the goal names, an Item the simulator can play, or a
+// Stadium that helps (Forest of Vitality, Area Zero Underdepths).
+registerEffect("Team Rocket's Petrel", (state, ctx) => {
+  const isTrainer = (card: DeckCard) =>
+    ['item', 'supporter', 'stadium', 'tool'].some((tag) => card.tags.includes(tag))
+  const worth = (card: DeckCard) => {
+    if (ctx.relevant.has(card.key)) return true
+    if (card.tags.includes('item')) return isImplemented(card)
+    const name = nameOf(card)
+    if (name === norm('Forest of Vitality')) return ctx.wantsGrassEvolution === true
+    if (name === norm('Area Zero Underdepths')) return ctx.wantsAnyBench
+    return false
+  }
+  const found = distinctCards(state.deck.filter((card) => isTrainer(card) && worth(card)))
+  return found.map((card) => {
+    const next = fetchToHand(state, card)
+    next.deck = fairShuffle(next, next.deck, ctx.seed)
+    next.shuffles = shufflesAfter(next)
+    return next
+  })
+})
+
 registerEffect('Poké Pad', (state, ctx) => {
   const found = choices(state, state.deck, (c) => isPokemon(c) && !hasRuleBox(c), ctx)
   return found.length > 0 ? found.map((card) => fetchToHand(state, card)) : [state]
@@ -459,50 +491,132 @@ registerEffect('Crispin', (state, ctx) => {
   return out.length > 0 ? out : [state]
 })
 
-/** Attach a Basic Energy from the discard to a benched Pokémon matching a filter. */
-function patchFromDiscard(
-  state: SimState,
-  energyOk: (card: DeckCard) => boolean,
-  targetOk: (card: DeckCard) => boolean,
-  max: number,
-): SimState[] {
-  const out: SimState[] = []
-  const sources = state.discard.filter((c) => isBasicEnergy(c) && energyOk(c))
-  if (sources.length === 0) return [state]
-
-  const targets = state.bench
-    .map((slot, index) => ({ slot, index }))
-    .filter((entry) => targetOk(entry.slot.card))
-  if (targets.length === 0) return [state]
-
-  for (const target of targets.slice(0, max)) {
-    const next = cloneState(state)
-    const source = next.discard.find((c) => isBasicEnergy(c) && energyOk(c))
-    if (!source) continue
-    removeFirst(next.discard, source)
-    next.bench[target.index].energy.push(source)
-    out.push(next)
-  }
-  return out.length > 0 ? out : [state]
+/** A Pokémon in play and where it sits: ACTIVE_TARGET or its bench index. */
+interface Placed {
+  slot: InPlay
+  target: number
 }
 
-registerEffect('Wondrous Patch', (state) =>
-  patchFromDiscard(
+/**
+ * Attach one Basic Energy from hand, discard or deck to a Pokémon — the move
+ * every Energy accelerator makes, whatever its source.
+ *
+ * Only where the Energy counts: on a Pokémon the goal wants Energy on (or an
+ * earlier stage of one), else on any Pokémon the goal names. Identical
+ * Pokémon carrying the same Energy are tried once. A type the goal asks for is
+ * attached first. Returns each board with where the Energy went; none when
+ * there is no Energy to move or nowhere it helps.
+ */
+export function attachFrom(
+  state: SimState,
+  ctx: EffectContext,
+  source: 'hand' | 'discard' | 'deck',
+  energyOk: (card: DeckCard) => boolean,
+  targetOk: (placed: Placed) => boolean,
+): { state: SimState; target: number }[] {
+  const pool = state[source]
+  const candidates = pool.filter((card) => isBasicEnergy(card) && energyOk(card))
+  if (candidates.length === 0) return []
+  const energy = candidates.find((card) => ctx.energyTypes.has(energyKind(card))) ?? candidates[0]
+
+  const wants = ctx.energyLineage ?? ctx.energyTargets
+  const counts = (slot: InPlay) =>
+    ctx.wantsEnergy ? wants.size === 0 || wants.has(slot.card.key) : ctx.relevant.has(slot.card.key)
+  const placed: Placed[] = [
+    ...(state.active ? [{ slot: state.active, target: -1 }] : []),
+    ...state.bench.map((slot, target) => ({ slot, target })),
+  ]
+  const seen = new Set<string>()
+  const out: { state: SimState; target: number }[] = []
+  for (const entry of placed) {
+    if (!targetOk(entry) || !counts(entry.slot)) continue
+    const same = `${entry.target === -1 ? 'A' : 'B'}${entry.slot.card.key}+${entry.slot.energy.length}`
+    if (seen.has(same)) continue
+    seen.add(same)
+    const next = cloneState(state)
+    removeFirst(next[source], energy)
+    const slot = entry.target === -1 ? next.active! : next.bench[entry.target]
+    slot.energy.push(energy)
+    if (source === 'deck') {
+      next.deck = fairShuffle(state, next.deck, ctx.seed)
+      next.shuffles = shufflesAfter(state)
+    }
+    out.push({ state: next, target: entry.target })
+  }
+  return out
+}
+
+const benched = ({ target }: Placed) => target !== -1
+const ofType = (type: string) => (card: DeckCard) => (card.card?.type ?? '').includes(type)
+
+// "Attach a Basic {P} Energy card from your discard pile to 1 of your Benched
+// {P} Pokémon."
+registerEffect('Wondrous Patch', (state, ctx) =>
+  attachFrom(
     state,
+    ctx,
+    'discard',
     (card) => energyType(card) === '{P}',
-    (card) => (card.card?.type ?? '').includes('{P}'),
-    1,
-  ),
+    (placed) => benched(placed) && ofType('{P}')(placed.slot.card),
+  ).map((moved) => moved.state),
 )
 
-registerEffect("N's PP Up", (state) =>
-  patchFromDiscard(
+// "Attach a Basic Energy card from your discard pile to 1 of your Benched N's
+// Pokémon."
+registerEffect("N's PP Up", (state, ctx) =>
+  attachFrom(
     state,
+    ctx,
+    'discard',
     () => true,
-    (card) => cardName(card).startsWith("N's"),
-    1,
-  ),
+    (placed) => benched(placed) && cardName(placed.slot.card).startsWith("N's"),
+  ).map((moved) => moved.state),
 )
+
+// "You can use this card only if you have any Tera Pokémon in play. Choose up
+// to 2 of your Benched {C} Pokémon and attach a Basic Energy card from your
+// discard pile to each of them."
+registerEffect('Glass Trumpet', (state, ctx) => {
+  const tera = [...(state.active ? [state.active] : []), ...state.bench].some((slot) =>
+    slot.card.tags.includes('tera'),
+  )
+  if (!tera) return []
+  const colorless = (placed: Placed) => benched(placed) && ofType('{C}')(placed.slot.card)
+  const out: SimState[] = []
+  for (const first of attachFrom(state, ctx, 'discard', () => true, colorless)) {
+    out.push(first.state)
+    // A second, to a different Pokémon.
+    const second = attachFrom(
+      first.state,
+      ctx,
+      'discard',
+      () => true,
+      (placed) => colorless(placed) && placed.target !== first.target,
+    )
+    out.push(...second.map((moved) => moved.state))
+  }
+  return out
+})
+
+/**
+ * Basic Energy a discard-pile accelerator ready to use could put straight
+ * back into play — Blaziken ex or Eelektrik in play, or Wondrous Patch,
+ * N's PP Up or Glass Trumpet in hand. Discarding such Energy to a cost loses
+ * nothing, so a cost should take it before a card the goal needs.
+ */
+function recoverable(state: SimState): (card: DeckCard) => boolean {
+  const checks: ((card: DeckCard) => boolean)[] = []
+  for (const slot of [...(state.active ? [state.active] : []), ...state.bench]) {
+    const recovers = abilityOf(slot.card)?.recoversEnergy
+    if (recovers) checks.push(recovers)
+  }
+  for (const card of state.hand) {
+    const name = nameOf(card)
+    if (name === norm('Wondrous Patch')) checks.push((c) => energyType(c) === '{P}')
+    if (name === norm("N's PP Up") || name === norm('Glass Trumpet')) checks.push(() => true)
+  }
+  return (card) => isBasicEnergy(card) && checks.some((check) => check(card))
+}
 
 registerEffect('Energy Switch', (state) => {
   // Move one Basic Energy between your own Pokémon.

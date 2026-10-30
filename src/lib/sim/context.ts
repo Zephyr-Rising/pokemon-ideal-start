@@ -46,8 +46,13 @@ export function buildContext(
   // Basics that grow into a draw engine — worth benching when the game runs
   // long enough for them to evolve.
   const drawEvolutionBases = new Set<string>()
+  const wantsAnyEnergy = [...(goal.active ? [goal.active] : []), ...goal.bench].some(
+    (slot) => slot.energy.length > 0,
+  )
   for (const card of cards) {
-    if (!card.card?.prev || !abilityOf(card)?.draws) continue
+    const def = abilityOf(card)
+    // Draw engines, and Energy accelerators when the goal wants Energy.
+    if (!card.card?.prev || !(def?.draws || (wantsAnyEnergy && def?.accelerates))) continue
     let base: string | undefined = norm(card.card.prev)
     for (let depth = 0; base && prevOf.has(base) && depth < 2; depth++) base = prevOf.get(base)
     if (base) drawEvolutionBases.add(base)

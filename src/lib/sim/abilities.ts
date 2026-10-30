@@ -1,7 +1,13 @@
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
 import { supporterChoices, takeFromTop } from './deck-look'
-import { choices, isPlayableSupporter, payDiscard, type EffectContext } from './effects'
+import {
+  attachFrom,
+  choices,
+  isPlayableSupporter,
+  payDiscard,
+  type EffectContext,
+} from './effects'
 import {
   ACTIVE_TARGET,
   benchCap,
@@ -47,6 +53,10 @@ export interface AbilityDef {
   onEvolve?: boolean
   /** Draws or searches, so evolving into it is worth it even unnamed. */
   draws?: boolean
+  /** Puts Energy into play, so it is worth having when the goal wants Energy. */
+  accelerates?: boolean
+  /** Basic Energy it can take back out of the discard pile. */
+  recoversEnergy?: (card: DeckCard) => boolean
   /** Extra conditions beyond position and once-per-turn. */
   usable?: (state: SimState, slot: InPlay) => boolean
   /** Every board this Ability can produce. */
@@ -478,34 +488,76 @@ register("N's Zoroark ex", {
 register('Hydrapple ex', {
   ability: 'Ripening Charge',
   perCopy: true,
+  accelerates: true,
   usable: (state) => holdsEnergy(state, '{G}'),
-  apply: (state, _target, ctx) => {
-    const at = state.hand.findIndex((card) => isBasicEnergy(card) && energyType(card) === '{G}')
-    if (at < 0) return []
-    // Where it helps: a Pokémon the goal wants Energy on (or an earlier stage
-    // of one), else anywhere the goal names. Identical Pokémon tried once.
-    const wants = ctx.energyLineage ?? ctx.energyTargets
-    const slots = [
-      ...(state.active ? [{ slot: state.active, target: ACTIVE_TARGET }] : []),
-      ...state.bench.map((slot, target) => ({ slot, target })),
-    ]
-    const useful = slots.filter(({ slot }) =>
-      ctx.wantsEnergy ? wants.size === 0 || wants.has(slot.card.key) : ctx.relevant.has(slot.card.key),
-    )
-    const seen = new Set<string>()
-    const out: SimState[] = []
-    for (const { slot, target } of useful) {
-      const same = `${target === ACTIVE_TARGET ? 'A' : 'B'}${slot.card.key}+${slot.energy.length}`
-      if (seen.has(same)) continue
-      seen.add(same)
-      const next = cloneState(state)
-      const [energy] = next.hand.splice(at, 1)
-      slotAt(next, target)!.energy.push(energy)
-      out.push(next)
-    }
-    return out
-  },
+  apply: (state, _target, ctx) =>
+    attachFrom(state, ctx, 'hand', isType('{G}'), () => true).map((moved) => moved.state),
 })
+
+// "Once during your turn, you may use this Ability. Attach a Basic {F} Energy
+// card from your hand to 1 of your {F} Pokémon."
+register('Barbaracle', {
+  ability: 'Stone Arms',
+  perCopy: true,
+  accelerates: true,
+  usable: (state) => holdsEnergy(state, '{F}'),
+  apply: (state, _target, ctx) =>
+    attachFrom(state, ctx, 'hand', isType('{F}'), ({ slot }) => pokemonOfType(slot, '{F}')).map(
+      (moved) => moved.state,
+    ),
+})
+
+// "Once during your turn, you may use this Ability. Search your deck for a
+// Basic {D} Energy card and attach it to 1 of your Benched {D} Pokémon. Then,
+// shuffle your deck. If you attached Energy to a Pokémon in this way, place 2
+// damage counters on that Pokémon." Damage does not matter to a board.
+register('Toxtricity', {
+  ability: 'Sinister Surge',
+  perCopy: true,
+  accelerates: true,
+  usable: (state) => state.deck.some(isType('{D}')),
+  apply: (state, _target, ctx) =>
+    attachFrom(
+      state,
+      ctx,
+      'deck',
+      isType('{D}'),
+      ({ slot, target }) => target !== ACTIVE_TARGET && pokemonOfType(slot, '{D}'),
+    ).map((moved) => moved.state),
+})
+
+// "Once during your turn, you may attach a Basic {L} Energy card from your
+// discard pile to 1 of your Benched Pokémon."
+register('Eelektrik', {
+  ability: 'Dynamotor',
+  perCopy: true,
+  accelerates: true,
+  recoversEnergy: isType('{L}'),
+  usable: (state) => state.discard.some(isType('{L}')),
+  apply: (state, _target, ctx) =>
+    attachFrom(state, ctx, 'discard', isType('{L}'), ({ target }) => target !== ACTIVE_TARGET).map(
+      (moved) => moved.state,
+    ),
+})
+
+// "Once during your turn, you may attach a Basic Energy card from your discard
+// pile to 1 of your Pokémon."
+register('Blaziken ex', {
+  ability: 'Seething Spirit',
+  perCopy: true,
+  accelerates: true,
+  recoversEnergy: () => true,
+  usable: (state) => state.discard.some(isBasicEnergy),
+  apply: (state, _target, ctx) =>
+    attachFrom(state, ctx, 'discard', () => true, () => true).map((moved) => moved.state),
+})
+
+/** A Basic Energy of this type. */
+function isType(type: string): (card: DeckCard) => boolean {
+  return (card) => isBasicEnergy(card) && energyType(card) === type
+}
+
+const pokemonOfType = (slot: InPlay, type: string) => (slot.card.card?.type ?? '').includes(type)
 
 // "Once during your turn, if your Active Pokémon has the Festival Lead Ability,
 // you may search your deck for a card and put it into your hand. Then, shuffle

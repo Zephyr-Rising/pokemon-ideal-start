@@ -99,7 +99,8 @@ export function setupScore(state: SimState, ctx: ActionContext): number {
     if (ctx.relevant.has(slot.card.key)) {
       score += tags.includes('stage2') ? 30 : tags.includes('stage1') ? 20 : 10
     }
-    if (abilityOf(slot.card)?.draws || abilityOf(slot.card)?.engine) score += 4
+    const def = abilityOf(slot.card)
+    if (def?.draws || def?.engine || (ctx.wantsEnergy && def?.accelerates)) score += 4
   }
   return score + state.hand.length * 0.5
 }

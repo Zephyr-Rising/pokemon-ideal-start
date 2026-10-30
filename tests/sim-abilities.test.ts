@@ -480,3 +480,63 @@ describe('Ripening Charge (Hydrapple ex) and Teal Dance per copy', () => {
     expect(abilityAvailable(after, 0)).toBe(true)
   })
 })
+
+describe('Energy accelerators', () => {
+  const target = (name: string, type: string) => ({ ...inPlay(mon(name, { type })), fresh: false })
+  const wantsOn = (key: string) => ctx({ wantsEnergy: true, energyTargets: new Set([key]) })
+
+  it('Stone Arms (Barbaracle): a Fighting Energy from hand to a Fighting Pokémon', () => {
+    const s = state({
+      active: inPlay(mon('Barbaracle', { type: '{F}' })),
+      bench: [target('Lucario', '{F}'), target('Pikachu', '{L}')],
+      hand: [energy('{F}')],
+    })
+    const results = useAbility(s, ACTIVE_TARGET, ctx({ wantsEnergy: true }))
+    // Only the Fighting Pokémon can take it (Barbaracle itself is one too).
+    expect(results.map((r) => [r.active!.energy.length, r.bench[0].energy.length, r.bench[1].energy.length])).toEqual([
+      [1, 0, 0],
+      [0, 1, 0],
+    ])
+  })
+
+  it('Sinister Surge (Toxtricity): a Darkness Energy from the deck to a Benched Darkness Pokémon', () => {
+    const dark = target('Zorua', '{D}')
+    const s = state({ active: inPlay(mon('Toxtricity', { type: '{D}' })), bench: [dark], deck: [...deckOf(4), energy('{D}')] })
+    const [after] = useAbility(s, ACTIVE_TARGET, wantsOn(dark.card.key))
+    expect(after.bench[0].energy).toHaveLength(1)
+    expect(after.deck).toHaveLength(4)
+    expect(after.shuffles).toBe(1)
+  })
+
+  it('Dynamotor (Eelektrik): a Lightning Energy from the discard, Bench only', () => {
+    const s = state({
+      active: inPlay(mon('Eelektrik', { type: '{L}' })),
+      bench: [target('Pikachu', '{L}')],
+      discard: [energy('{L}')],
+    })
+    const results = useAbility(s, ACTIVE_TARGET, ctx({ wantsEnergy: true }))
+    expect(results).toHaveLength(1)
+    expect(results[0].bench[0].energy).toHaveLength(1)
+    expect(results[0].discard).toHaveLength(0)
+  })
+
+  it('Seething Spirit (Blaziken ex): any Basic Energy from the discard to any Pokémon', () => {
+    const s = state({ active: inPlay(mon('Blaziken ex', { type: '{R}' })), discard: [energy('{W}')] })
+    const [after] = useAbility(s, ACTIVE_TARGET, ctx({ wantsEnergy: true }))
+    expect(after.active!.energy).toHaveLength(1)
+    // Once per Blaziken ex.
+    expect(abilityAvailable(after, ACTIVE_TARGET)).toBe(false)
+  })
+
+  it('puts the Energy only where the goal wants it', () => {
+    const want = target('Lucario', '{F}')
+    const s = state({
+      active: inPlay(mon('Barbaracle', { type: '{F}' })),
+      bench: [want, target('Hariyama', '{F}')],
+      hand: [energy('{F}')],
+    })
+    const results = useAbility(s, ACTIVE_TARGET, wantsOn(want.card.key))
+    expect(results).toHaveLength(1)
+    expect(results[0].bench[0].energy).toHaveLength(1)
+  })
+})

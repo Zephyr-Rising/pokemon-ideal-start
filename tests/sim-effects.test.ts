@@ -390,8 +390,8 @@ describe('energy', () => {
 
   it('Wondrous Patch does nothing without a Psychic target', () => {
     const s = state({ bench: [inPlay(basic('grassy', 60, { type: '{G}' }))], discard: [energy('p', '{P}')] })
-    const [after] = play('Wondrous Patch', s)
-    expect(after.bench[0].energy).toHaveLength(0)
+    // Nothing to do is not a play.
+    expect(play('Wondrous Patch', s)).toEqual([])
   })
 
   it("N's PP Up only targets N's Pokémon", () => {
@@ -402,7 +402,7 @@ describe('energy', () => {
     expect(play("N's PP Up", withN)[0].bench[0].energy).toHaveLength(1)
 
     const without = state({ bench: [inPlay(basic('Dreepy'))], discard: [energy('d', '{D}')] })
-    expect(play("N's PP Up", without)[0].bench[0].energy).toHaveLength(0)
+    expect(play("N's PP Up", without)).toEqual([])
   })
 
   it('Energy Switch moves Energy between your Pokémon', () => {
@@ -557,5 +557,58 @@ describe('fetching a Supporter nobody named', () => {
     const s = state({ deck: [trainer("Boss's Orders", 'supporter'), trainer('Judge', 'supporter'), ...Array.from({ length: 5 }, (_, i) => trainer(`f${i}`, 'item'))] })
     const results = play('Pokégear 3.0', s, ctx({ wantsAnyBench: false, wantsEnergy: false }))
     expect(results.map((r) => keys(r.hand))).toEqual([['judge']])
+  })
+})
+
+describe('Glass Trumpet', () => {
+  const tera = card('tera', ['pokemon', 'basic', 'tera'], { name: 'Terapagos ex', type: '{C}' })
+  const colorless = (k: string) => basic(k, 60, { type: '{C}' })
+
+  it('needs a Tera Pokémon in play', () => {
+    const s = state({ active: inPlay(basic('x')), bench: [inPlay(colorless('a'))], discard: [energy('e')] })
+    expect(play('Glass Trumpet', s)).toEqual([])
+  })
+
+  it('attaches Energy from the discard to up to 2 different Benched Colorless Pokémon', () => {
+    const s = state({
+      active: inPlay(tera),
+      bench: [inPlay(colorless('a')), inPlay(colorless('b')), inPlay(basic('grassy', 60, { type: '{G}' }))],
+      discard: [energy('e1'), energy('e2')],
+    })
+    const results = play('Glass Trumpet', s)
+    const both = results.find((r) => r.bench[0].energy.length === 1 && r.bench[1].energy.length === 1)
+    expect(both).toBeDefined()
+    expect(results.every((r) => r.bench[2].energy.length === 0)).toBe(true)
+    expect(results.every((r) => r.bench.every((slot) => slot.energy.length <= 1))).toBe(true)
+  })
+})
+
+describe("Team Rocket's Petrel", () => {
+  const petrelCtx = ctx({ relevant: new Set(['target']), wantsAnyBench: false, wantsEnergy: false })
+
+  it('fetches a Trainer the goal names, or an Item the simulator can play', () => {
+    const s = state({
+      deck: [trainer('Ultra Ball', 'item'), trainer("Boss's Orders", 'supporter'), card('target', ['tool'], { name: 'target' })],
+    })
+    const fetched = play("Team Rocket's Petrel", s, petrelCtx).map((r) => keys(r.hand))
+    expect(fetched).toEqual(expect.arrayContaining([['ultra-ball'], ['target']]))
+    // Never a Supporter nobody asked for: Petrel already used the turn's one.
+    expect(fetched.flat()).not.toContain("boss's-orders")
+  })
+})
+
+describe('discard costs with an accelerator ready', () => {
+  it('pitch Energy an accelerator can put straight back, before a card the goal needs', () => {
+    const blaziken = card('blaziken', ['pokemon', 'stage2'], { name: 'Blaziken ex', type: '{R}' })
+    const s = state({
+      active: inPlay(blaziken),
+      hand: [basic('wanted'), energy('fire', '{R}'), energy('water', '{W}')],
+      deck: [basic('target')],
+    })
+    const c = ctx({ relevant: new Set(['wanted', 'target']), wantsAnyBench: false })
+    const [after] = play('Ultra Ball', s, c)
+    // Both Energy went to the discard; the Pokémon the goal wants stayed.
+    expect(keys(after.hand).sort()).toEqual(['target', 'wanted'])
+    expect(after.discard.filter((c) => c.tags.includes('energy'))).toHaveLength(2)
   })
 })

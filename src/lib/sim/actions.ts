@@ -251,7 +251,9 @@ export function legalActions(state: SimState, ctx: ActionContext): Action[] {
   const seenEvolve = new Set<string>()
   state.hand.forEach((card, handIndex) => {
     if (!isEvolutionCard(card)) return
-    if (!ctx.relevant.has(card.key) && !abilityOf(card)?.draws) return
+    const def = abilityOf(card)
+    // An Energy accelerator, too, when the goal wants Energy.
+    if (!ctx.relevant.has(card.key) && !def?.draws && !(ctx.wantsEnergy && def?.accelerates)) return
     for (const target of targets(state)) {
       const slot = slotAt(state, target)!
       const key = `${card.key}>${slot.card.key}${slot.fresh ? '*' : ''}`
