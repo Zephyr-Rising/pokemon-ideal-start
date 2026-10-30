@@ -166,27 +166,41 @@ export function onBenchPlay(state: SimState, benchIndex: number, ctx: EffectCont
   return [...def.apply(spend(state, slot.card), benchIndex, ctx), state]
 }
 
+/** One card a draw engine needs, and where it stands. */
+interface EnginePiece {
+  is: (card: DeckCard) => boolean
+  /** In play, or in hand. Fuel only counts in hand, since it is spent from there. */
+  held: boolean
+  /** Held only because it is in hand, so discarding it would lose it. */
+  onlyInHand: boolean
+  /** A Pokémon that still has to be benched before the engine runs. */
+  needsBench: boolean
+}
+
 /**
- * Deck or discard cards worth fetching because they finish a draw engine.
+ * The draw engines worth building this turn, piece by piece.
  *
- * The goal names the board you want, not the engine that digs for it, so
- * without this a search card could never fetch Solrock or the Energy Lunar
- * Cycle discards. Pieces are the Pokémon, its partner, then its fuel, and only
- * the **first** missing one is offered: the Energy is worthless while Solrock
- * is still in the deck, and offering everything would multiply the search.
- *
- * An engine with several pieces counts only once one of them is already held
- * (in play, or in hand where a Basic can still be benched), so a deck is not
- * dragged into building an engine it has shown no sign of using. Abilities
- * that only work from the Active Spot are left out: getting one there costs a
- * switch on top of the fetch, which a draw of 2 does not repay.
+ * Pieces are the Pokémon, its partner, then its fuel. An engine with several
+ * pieces counts only once one of them is already held (in play, or in hand
+ * where a Basic can still be benched), so a deck is not dragged into building
+ * an engine it has shown no sign of using. Abilities that only work from the
+ * Active Spot are left out: getting one there costs a switch on top of the
+ * fetch, which a draw of 2 does not repay.
  */
-export function engineWants(state: SimState): (card: DeckCard) => boolean {
-  const held = [...inPlayCards(state).map((slot) => slot.card), ...state.hand]
-  const holds = (name: string) => held.some((card) => norm(cardName(card)) === norm(name))
+function liveEngines(state: SimState): EnginePiece[][] {
   const named = (name: string) => (card: DeckCard) => norm(cardName(card)) === norm(name)
-  const room = state.bench.length < benchCap(state)
-  const wanted: ((card: DeckCard) => boolean)[] = []
+  const pokemonPiece = (name: string): EnginePiece => {
+    const is = named(name)
+    const inPlayNow = inPlayCards(state).some((slot) => is(slot.card))
+    const inHand = state.hand.some(is)
+    return { is, held: inPlayNow || inHand, onlyInHand: !inPlayNow && inHand, needsBench: !inPlayNow }
+  }
+  const fuelPiece = (is: (card: DeckCard) => boolean): EnginePiece => {
+    const inHand = state.hand.some(is)
+    return { is, held: inHand, onlyInHand: inHand, needsBench: false }
+  }
+  const free = benchCap(state) - state.bench.length
+  const engines: EnginePiece[][] = []
 
   for (const [pokemon, def] of ABILITIES) {
     const engine = def.engine
@@ -195,20 +209,54 @@ export function engineWants(state: SimState): (card: DeckCard) => boolean {
     if (engine.worthIt && !engine.worthIt(state)) continue
 
     const pieces = [
-      { held: holds(pokemon), is: named(pokemon), bench: true },
-      ...(engine.partner
-        ? [{ held: holds(engine.partner), is: named(engine.partner), bench: true }]
-        : []),
-      ...(engine.fuel ? [{ held: state.hand.some(engine.fuel), is: engine.fuel, bench: false }] : []),
+      pokemonPiece(pokemon),
+      ...(engine.partner ? [pokemonPiece(engine.partner)] : []),
+      ...(engine.fuel ? [fuelPiece(engine.fuel)] : []),
     ]
-    const missing = pieces.filter((piece) => !piece.held)
-    if (missing.length === 0) continue
-    if (pieces.length > 1 && missing.length === pieces.length) continue
-    // Each missing Pokémon needs a bench slot, so a full bench ends the engine.
-    if (!room && missing.some((piece) => piece.bench)) continue
-    wanted.push(missing[0].is)
+    if (pieces.length > 1 && pieces.every((piece) => !piece.held)) continue
+    // A missing piece has to be somewhere a card can fetch it from, or holding
+    // a Grass Energy would keep Teal Dance alive in a deck with no Ogerpon.
+    const reachable = (piece: EnginePiece) =>
+      state.deck.some(piece.is) || state.discard.some(piece.is)
+    if (pieces.some((piece) => !piece.held && !reachable(piece))) continue
+    // Every Pokémon not yet in play needs a bench slot, held or not.
+    if (pieces.filter((piece) => piece.needsBench).length > free) continue
+    engines.push(pieces)
   }
-  return (card) => wanted.some((is) => is(card))
+  return engines
+}
+
+/**
+ * Deck or discard cards worth fetching because they finish a draw engine.
+ *
+ * The goal names the board you want, not the engine that digs for it, so
+ * without this a search card could never fetch Solrock or the Energy Lunar
+ * Cycle discards. Only the **first** missing piece is offered: the Energy is
+ * worthless while Solrock is still in the deck, and offering everything would
+ * multiply the search.
+ */
+export function engineWants(state: SimState): (card: DeckCard) => boolean {
+  const wanted = liveEngines(state)
+    .map((pieces) => pieces.find((piece) => !piece.held))
+    .filter((piece): piece is EnginePiece => piece !== undefined)
+  return (card) => wanted.some((piece) => piece.is(card))
+}
+
+/**
+ * Indices of hand cards that a draw engine is counting on, so a discard cost
+ * pitches something else first. One copy per piece: a second {F} Energy is
+ * not needed for Lunar Cycle, so it is as expendable as any other card.
+ */
+export function engineKeeps(state: SimState): Set<number> {
+  const keep = new Set<number>()
+  for (const pieces of liveEngines(state)) {
+    for (const piece of pieces) {
+      if (!piece.onlyInHand) continue
+      const at = state.hand.findIndex((card, index) => piece.is(card) && !keep.has(index))
+      if (at >= 0) keep.add(at)
+    }
+  }
+  return keep
 }
 
 // --- draw and search -------------------------------------------------------

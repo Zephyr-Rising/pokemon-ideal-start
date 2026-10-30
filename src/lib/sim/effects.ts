@@ -1,7 +1,7 @@
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
 import { hashString, mulberry32, shuffled } from './rng'
-import { engineWants } from './abilities'
+import { engineKeeps, engineWants } from './abilities'
 import {
   benchCap,
   cardName,
@@ -130,6 +130,10 @@ const removeFirst = (pool: DeckCard[], card: DeckCard): void => {
 /**
  * Pay a discard cost from hand, keeping whatever the goal needs.
  *
+ * A piece a draw engine is counting on is kept like a card the goal wants in
+ * general: pitching Lunar Cycle's only {F} Energy to Ultra Ball would throw
+ * away the draw 3 the line is building toward.
+ *
  * Which cards to pitch is a judgement call rather than a branch: discarding the
  * least useful cards is always at least as good, so this resolves to one
  * outcome instead of multiplying the search.
@@ -137,8 +141,13 @@ const removeFirst = (pool: DeckCard[], card: DeckCard): void => {
 function payDiscard(state: SimState, count: number, ctx: EffectContext): SimState | null {
   if (state.hand.length < count) return null
   const next = cloneState(state)
+  const engine = engineKeeps(state)
   const ranked = next.hand
-    .map((card, index) => ({ card, index, keep: keepRank(card, ctx) }))
+    .map((card, index) => ({
+      card,
+      index,
+      keep: Math.max(keepRank(card, ctx), engine.has(index) ? 1 : 0),
+    }))
     .sort((a, b) => a.keep - b.keep || a.index - b.index)
   for (const entry of ranked.slice(0, count)) next.discard.push(entry.card)
   const dropped = new Set(ranked.slice(0, count).map((e) => e.index))

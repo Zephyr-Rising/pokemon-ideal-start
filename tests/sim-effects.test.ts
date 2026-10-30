@@ -195,6 +195,57 @@ describe('draw engines', () => {
     expect(fetched(play('Ultra Ball', s, goalOnly), s)).toEqual([])
   })
 
+  it('Ultra Ball keeps the Energy Lunar Cycle is about to discard', () => {
+    const lunatone = basic('Lunatone', 110, { type: '{F}' })
+    const solrock = basic('Solrock', 110, { type: '{F}' })
+    const board = { active: inPlay(lunatone), bench: [inPlay(solrock)], deck: [basic('x')] }
+    // The {F} Energy is first in hand, so index order alone would pitch it.
+    const s = state({ ...board, hand: [energy('fighting', '{F}'), energy('a'), energy('b')] })
+    const [after] = play('Ultra Ball', s, goalOnly)
+    expect(keys(after.hand)).toEqual(['fighting'])
+
+    // Once Lunar Cycle is spent the Energy is just another card.
+    const spent = state({ ...s, usedAbilities: ['lunatone'] })
+    const [afterSpent] = play('Ultra Ball', spent, goalOnly)
+    expect(keys(afterSpent.hand)).toEqual(['b'])
+  })
+
+  it('keeps only one copy of an engine piece', () => {
+    const lunatone = basic('Lunatone', 110, { type: '{F}' })
+    const solrock = basic('Solrock', 110, { type: '{F}' })
+    const s = state({
+      active: inPlay(lunatone),
+      bench: [inPlay(solrock)],
+      hand: [energy('f1', '{F}'), energy('f2', '{F}'), energy('a')],
+      deck: [basic('x')],
+    })
+    const [after] = play('Ultra Ball', s, goalOnly)
+    expect(keys(after.hand)).toEqual(['f1'])
+  })
+
+  it('only protects a piece when the rest of its engine can still be found', () => {
+    // A Grass Energy is Teal Dance fuel, but only in a deck that runs Ogerpon.
+    const hand = [energy('grass', '{G}'), energy('fire', '{R}'), energy('water', '{W}')]
+    const without = state({ active: inPlay(basic('x')), hand, deck: [basic('y')] })
+    expect(keys(play('Ultra Ball', without, goalOnly)[0].hand)).toEqual(['water'])
+
+    const withOgerpon = state({ active: inPlay(basic('x')), hand, deck: [ogerpon] })
+    const results = play('Ultra Ball', withOgerpon, goalOnly)
+    expect(results.every((r) => keys(r.hand).includes('grass'))).toBe(true)
+  })
+
+  it('gives up on an engine whose Pokémon cannot fit on the bench', () => {
+    // Lunatone is in hand but the bench is full, so Lunar Cycle can never run
+    // and its Energy is not worth a search.
+    const s = state({
+      active: inPlay(basic('Solrock', 110, { type: '{F}' })),
+      bench: Array.from({ length: 5 }, (_, i) => inPlay(basic(`b${i}`))),
+      hand: [basic('Lunatone', 110, { type: '{F}' })],
+      deck: [energy('fighting', '{F}')],
+    })
+    expect(fetched(play('Fighting Gong', s, goalOnly), s)).toEqual([])
+  })
+
   it('still prefers the goal card when the effect only takes one', () => {
     const s = state({ hand: [], deck: [meowth, exMon('target')] })
     const results = play('Poké Pad', s, goalOnly)
