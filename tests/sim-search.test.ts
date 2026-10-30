@@ -299,3 +299,35 @@ describe('Tools on the board', () => {
     expect(result.score.strict).toBe(true)
   })
 })
+
+describe('Telepathic Psychic Energy', () => {
+  const telepathic = card('telepathic', ['energy', 'special-energy'], {
+    name: 'Telepathic Psychic Energy',
+    effect:
+      'As long as this card is attached to a Pokémon, it provides {P} Energy. When you attach this card from your hand to a {P} Pokémon, search your deck for up to 2 Basic {P} Pokémon and put them onto your Bench. Then, shuffle your deck.',
+  })
+  const psychic = (key: string) => card(key, ['pokemon', 'basic'], { name: key, type: '{P}' })
+
+  it('benches two Basic Psychic Pokémon when attached to a Psychic Pokémon', () => {
+    // The goal wants no Energy at all: the attachment is worth it for the search.
+    const s = state({
+      active: inPlay(psychic('abra')),
+      hand: [telepathic],
+      deck: [psychic('ralts'), psychic('munna'), basic('filler')],
+    })
+    const result = run(s, goal({ bench: [slot('r', 'ralts'), slot('m', 'munna')] }))
+    expect(result.score.strict).toBe(true)
+    expect(result.line.map((a) => a.kind)).toEqual(['attachEnergy'])
+    expect(result.steps[0]).toMatch(/benching/)
+  })
+
+  it('does nothing extra on a Pokémon that is not Psychic', () => {
+    const s = state({
+      active: inPlay(basic('grassy')),
+      hand: [telepathic],
+      deck: [psychic('ralts'), psychic('munna')],
+    })
+    const result = run(s, goal({ bench: [slot('r', 'ralts')] }))
+    expect(result.score.strict).toBe(false)
+  })
+})

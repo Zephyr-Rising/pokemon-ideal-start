@@ -603,7 +603,75 @@ export function attachFrom(
       next.deck = fairShuffle(state, next.deck, ctx.seed)
       next.shuffles = shufflesAfter(state)
     }
+    if (source === 'hand') {
+      for (const after of onAttachFromHand(next, energy, slot.card, ctx)) {
+        out.push({ state: after, target: entry.target })
+      }
+      continue
+    }
     out.push({ state: next, target: entry.target })
+  }
+  return out
+}
+
+const TELEPATHIC = norm('Telepathic Psychic Energy')
+
+/** A Pokémon of this type, by its printed type. */
+const isPokemonOfType = (card: DeckCard, type: string) =>
+  card.tags.includes('pokemon') && (card.card?.type ?? '').includes(type)
+
+/**
+ * Would attaching this Energy from hand to this Pokémon set off a search?
+ * Telepathic Psychic Energy does, onto a Psychic Pokémon — and is only worth
+ * it while a Basic Psychic the goal can use is in the deck, with room for it.
+ */
+export function attachSearches(
+  state: SimState,
+  energy: DeckCard,
+  holder: DeckCard,
+  ctx: EffectContext,
+): boolean {
+  if (nameOf(energy) !== TELEPATHIC || !isPokemonOfType(holder, '{P}')) return false
+  if (state.bench.length >= benchCap(state)) return false
+  return choices(state, state.deck, (card) => isBasicPokemon(card) && isPokemonOfType(card, '{P}'), ctx).length > 0
+}
+
+/**
+ * What happens as an Energy is attached from hand: usually nothing more.
+ * Telepathic Psychic Energy on a Psychic Pokémon: "search your deck for up to
+ * 2 Basic {P} Pokémon and put them onto your Bench. Then, shuffle your deck."
+ * Branches like Buddy-Buddy Poffin — each Pokémon worth benching, each pair
+ * the deck can supply, and none — and every branch shuffles.
+ */
+export function onAttachFromHand(
+  state: SimState,
+  energy: DeckCard,
+  holder: DeckCard,
+  ctx: EffectContext,
+): SimState[] {
+  if (nameOf(energy) !== TELEPATHIC || !isPokemonOfType(holder, '{P}')) return [state]
+  const psychic = (card: DeckCard) => isBasicPokemon(card) && isPokemonOfType(card, '{P}')
+  const shuffle = (next: SimState) => {
+    next.deck = fairShuffle(state, next.deck, ctx.seed)
+    next.shuffles = shufflesAfter(state)
+    return next
+  }
+  const out: SimState[] = [shuffle(cloneState(state))]
+  const first = choices(state, state.deck, psychic, ctx)
+  for (const [i, a] of first.entries()) {
+    if (state.bench.length >= benchCap(state)) break
+    const one = cloneState(state)
+    removeFirst(one.deck, a)
+    one.bench.push(inPlay(a))
+    out.push(shuffle(cloneState(one)))
+    if (one.bench.length >= benchCap(one)) continue
+    // The second from the same or a later choice, so each pair comes once.
+    for (const b of choices(one, one.deck, psychic, ctx).filter((card) => first.indexOf(card) >= i || !first.includes(card))) {
+      const two = cloneState(one)
+      removeFirst(two.deck, b)
+      two.bench.push(inPlay(b))
+      out.push(shuffle(two))
+    }
   }
   return out
 }

@@ -9,7 +9,13 @@ import {
   useAbility,
 } from './abilities'
 import { attack, attackAvailable, attackOf, costPaid } from './attacks'
-import { lookupEffect, worthSwitching, type EffectContext } from './effects'
+import {
+  attachSearches,
+  lookupEffect,
+  onAttachFromHand,
+  worthSwitching,
+  type EffectContext,
+} from './effects'
 import {
   allInPlay,
   ACTIVE_TARGET,
@@ -216,7 +222,13 @@ export function legalActions(state: SimState, ctx: ActionContext): Action[] {
   // Ogerpon itself and Crispin to any Pokémon, because that Energy can still be
   // carried to where the goal wants it by Energy Switch.
   const payingRetreat = needsRetreatEnergy(state, ctx)
-  if (!state.usedEnergy && (ctx.wantsEnergy || payingRetreat || attackNeedsEnergy(state))) {
+  const searchesOnAttach = state.hand.some(
+    (card) => isEnergy(card) && targets(state).some((t) => attachSearches(state, card, slotAt(state, t)!.card, ctx)),
+  )
+  if (
+    !state.usedEnergy &&
+    (ctx.wantsEnergy || payingRetreat || attackNeedsEnergy(state) || searchesOnAttach)
+  ) {
     const seenEnergy = new Set<string>()
     state.hand.forEach((card, handIndex) => {
       if (!isEnergy(card) || seenEnergy.has(card.key)) return
@@ -238,7 +250,10 @@ export function legalActions(state: SimState, ctx: ActionContext): Action[] {
         const forRetreat = payingRetreat && target === ACTIVE_TARGET
         // Or onto an Active whose searching attack still needs it paid.
         const forAttack = target === ACTIVE_TARGET && attackNeedsEnergy(state)
-        if (forGoal || forRetreat || forAttack) {
+        // Or wherever the attachment itself searches: Telepathic Psychic
+        // Energy on a Psychic Pokémon benches Basic Psychic Pokémon.
+        const forSearch = attachSearches(state, card, slot.card, ctx)
+        if (forGoal || forRetreat || forAttack || forSearch) {
           actions.push({ kind: 'attachEnergy', handIndex, target })
         }
       }
@@ -372,7 +387,8 @@ export function applyAction(state: SimState, action: Action, ctx: ActionContext)
       const slot = action.target === ACTIVE_TARGET ? next.active! : next.bench[action.target]
       slot.energy.push(card)
       next.usedEnergy = true
-      return [next]
+      // Some Energy does something as it is attached from hand.
+      return onAttachFromHand(next, card, slot.card, ctx)
     }
 
     case 'attachTool': {

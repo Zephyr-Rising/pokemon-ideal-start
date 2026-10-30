@@ -141,7 +141,9 @@ export function describeStep(before: SimState, after: SimState, action: Action):
       const card = before.hand[action.handIndex]
       const target =
         action.target === ACTIVE_TARGET ? after.active! : after.bench[action.target]
-      return `Attach ${label(card)} to ${label(target.card)}`
+      const attached = `Attach ${label(card)} to ${label(target.card)}`
+      // Telepathic Psychic Energy benches as it goes on.
+      return benched.length > 0 ? `${attached} — benching ${list(benched)}` : attached
     }
 
     case 'attachTool': {
