@@ -200,3 +200,26 @@ test('attaches Energy by tapping, tucked behind the Pokémon', async ({ page }) 
     page.getByRole('button', { name: 'Remove one Any Energy from Teal Mask Ogerpon ex' }),
   ).toHaveCount(1)
 })
+
+test('shows how many turns a board takes, in its own tab', async ({ page }) => {
+  await stubCardArt(page)
+  await page.goto('./')
+  await page.getByRole('button', { name: 'Load example' }).click()
+  await page.getByRole('tab', { name: 'Turns to build' }).click()
+
+  // The board is shared with the Turn 1 tab.
+  await page.getByRole('button', { name: 'Pick Mega Kangaskhan ex' }).click()
+  await page.getByRole('button', { name: 'Place in Active spot' }).click()
+
+  const median = page.getByTestId('turns-median')
+  await expect(median).toBeVisible({ timeout: 90_000 })
+  await expect(median).toHaveText(/^\d\+?$/)
+  await expect(page.getByTestId('turns-mean')).toHaveText(/^(\d\.\d|—)$/)
+  await expect(page.getByTestId('turns-first')).toBeVisible()
+  await expect(page.getByTestId('turns-second')).toBeVisible()
+  await expect(page.getByTestId('turns-distribution').getByText('Turn 6')).toBeVisible()
+
+  // Switching tabs keeps the board.
+  await page.getByRole('tab', { name: 'Turn 1 board' }).click()
+  await expect(page.getByRole('button', { name: 'Remove Mega Kangaskhan ex' })).toBeVisible()
+})

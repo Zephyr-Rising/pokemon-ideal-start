@@ -2,6 +2,7 @@ import { useDeferredValue, useMemo, useState } from 'react'
 
 import { BoardEditor } from './components/board/BoardEditor'
 import { PlaytestResults } from './components/board/PlaytestResults'
+import { TurnsResults } from './components/board/TurnsResults'
 import { ConditionBuilder } from './components/ConditionBuilder'
 import { DeckImport } from './components/DeckImport'
 import { PrizeRisk } from './components/PrizeRisk'
@@ -22,14 +23,16 @@ import { sensitivity } from './lib/prob/sensitivity'
 import { resolveDeck } from './lib/resolve-cards'
 import { sampleHand, type SampleMode } from './lib/sample-hand'
 import { seedCondition } from './lib/seed-condition'
-import { usePlaytest } from './lib/use-playtest'
+import { usePlaytest, useTurns } from './lib/use-playtest'
 
 /** Identity of the deck's card set, ignoring copy counts. */
 const cardSignature = (keys: string[]): string => [...keys].sort().join('|')
 
-type Tab = 'hand' | 'board'
+type Tab = 'hand' | 'board' | 'turns'
 
 const TRIAL_CHOICES = [500, 1500, 4000] as const
+/** Each game plays up to six turns, so fewer games keep a run quick. */
+const TURN_TRIAL_CHOICES = [100, 300, 1000] as const
 
 export default function App() {
   const [text, setText] = useState('')
@@ -38,6 +41,7 @@ export default function App() {
   const [edited, setEdited] = useState(false)
   const [tab, setTab] = useState<Tab>('hand')
   const [trials, setTrials] = useState<number>(1500)
+  const [turnTrials, setTurnTrials] = useState<number>(300)
 
   const deck = useMemo(() => resolveDeck(text), [text])
 
@@ -103,7 +107,9 @@ export default function App() {
 
   // The turn-1 playtest is far too slow for the main thread, so it runs in a
   // worker and streams progress.
-  const playtest = usePlaytest(deck.cards, goal, trials, 1)
+  // Each runs only while its tab is open.
+  const playtest = usePlaytest(deck.cards, goal, trials, 1, tab === 'board')
+  const turns = useTurns(deck.cards, goal, turnTrials, 1, tab === 'turns')
 
   const hasDeck = deck.cards.length > 0
 
@@ -133,6 +139,9 @@ export default function App() {
               <Tab id="board" active={tab} onSelect={setTab}>
                 Turn 1 board
               </Tab>
+              <Tab id="turns" active={tab} onSelect={setTab}>
+                Turns to build
+              </Tab>
             </div>
 
             {tab === 'hand' ? (
@@ -155,6 +164,16 @@ export default function App() {
                 <SensitivityTable rows={sensitivityRows} />
                 <PrizeRisk cards={prizes.cards} groups={prizes.groups} />
               </div>
+            ) : tab === 'turns' ? (
+              <div role="tabpanel" className="space-y-10">
+                <BoardEditor cards={deck.cards} goal={goal} onChange={setGoal} horizon="turns" />
+                <TurnsResults goal={goal} state={turns} trials={turnTrials} />
+                <TrialPicker
+                  value={turnTrials}
+                  choices={TURN_TRIAL_CHOICES}
+                  onChange={setTurnTrials}
+                />
+              </div>
             ) : (
               <div role="tabpanel" className="space-y-10">
                 <BoardEditor cards={deck.cards} goal={goal} onChange={setGoal} />
@@ -164,21 +183,7 @@ export default function App() {
                   trials={trials}
                   cards={deck.cards}
                 />
-                <label className="flex items-center gap-2 text-xs text-slate-500">
-                  Games played:
-                  <select
-                    value={trials}
-                    onChange={(e) => setTrials(Number(e.target.value))}
-                    className="rounded-md border border-slate-300 px-2 py-1 dark:border-slate-700 dark:bg-slate-950"
-                  >
-                    {TRIAL_CHOICES.map((count) => (
-                      <option key={count} value={count}>
-                        {count.toLocaleString()}
-                      </option>
-                    ))}
-                  </select>
-                  more games narrows the margin of error
-                </label>
+                <TrialPicker value={trials} choices={TRIAL_CHOICES} onChange={setTrials} />
               </div>
             )}
           </>
@@ -194,6 +199,34 @@ export default function App() {
         </p>
       </footer>
     </div>
+  )
+}
+
+function TrialPicker({
+  value,
+  choices,
+  onChange,
+}: {
+  value: number
+  choices: readonly number[]
+  onChange: (trials: number) => void
+}) {
+  return (
+    <label className="flex items-center gap-2 text-xs text-slate-500">
+      Games played:
+      <select
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="rounded-md border border-slate-300 px-2 py-1 dark:border-slate-700 dark:bg-slate-950"
+      >
+        {choices.map((count) => (
+          <option key={count} value={count}>
+            {count.toLocaleString()}
+          </option>
+        ))}
+      </select>
+      more games narrows the margin of error
+    </label>
   )
 }
 

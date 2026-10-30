@@ -33,6 +33,8 @@ interface Props {
   cards: DeckCard[]
   goal: FieldGoal
   onChange: (goal: FieldGoal) => void
+  /** Building it by the end of turn 1, or by whichever turn it takes. */
+  horizon?: 'turn1' | 'turns'
 }
 
 /**
@@ -78,7 +80,7 @@ const describeCard = (card: DeckCard): DroppedCard => ({
   energyType: card.card?.type || null,
 })
 
-export function BoardEditor({ cards, goal, onChange }: Props) {
+export function BoardEditor({ cards, goal, onChange, horizon = 'turn1' }: Props) {
   // Click-to-place: pick a card, then pick a zone. Keeps the board usable on a
   // touch screen and by keyboard, where dragging is not an option.
   const [picked, setPicked] = useState<string | null>(null)
@@ -154,10 +156,15 @@ export function BoardEditor({ cards, goal, onChange }: Props) {
     <DndContext sensors={sensors} onDragEnd={onDragEnd}>
       <section className="space-y-4">
         <header className="space-y-1">
-          <h2 className="text-lg font-semibold">2 · Your board at the end of turn 1</h2>
+          <h2 className="text-lg font-semibold">
+            {horizon === 'turn1' ? '2 · Your board at the end of turn 1' : '2 · The board to build'}
+          </h2>
           <p className="text-xs text-slate-500">
             Drag a card onto the board, or tap one and then tap where it goes. Everything you place
-            becomes something the deck has to achieve by the end of its first turn.
+            becomes something the deck has to achieve
+            {horizon === 'turn1'
+              ? ' by the end of its first turn.'
+              : ', and evolved Pokémon count — this is the board shared with the Turn 1 tab.'}
           </p>
         </header>
 

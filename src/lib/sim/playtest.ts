@@ -4,7 +4,7 @@ import { draw, type ActionContext } from './actions'
 import { buildContext } from './context'
 import { isImplemented } from './effects'
 import { mulberry32, shuffled } from './rng'
-import { searchBestLine } from './search'
+import { searchBestLine, setupScore } from './search'
 import { cardName, inPlay, isBasicPokemon, type SimState } from './state'
 
 export interface PlaytestOptions {
@@ -121,7 +121,7 @@ const DEFAULT_TRIALS = 1_500
 const MAX_EXAMPLES = 6
 
 /** One entry per physical copy — the deck as it is actually shuffled. */
-function physicalDeck(cards: DeckCard[]): DeckCard[] {
+export function physicalDeck(cards: DeckCard[]): DeckCard[] {
   const out: DeckCard[] = []
   for (const card of cards) {
     for (let copy = 0; copy < card.count; copy++) out.push(card)
@@ -211,7 +211,7 @@ export function playtest(
     }
 
     const deal: Deal = { hand: order.slice(0, 7), prizes: order.slice(7, 13), rest: order.slice(13) }
-    const ctx = buildContext(goal, rng, seed + trial)
+    const ctx = buildContext(goal, rng, seed + trial, cards)
 
     // Going second allows every play going first does, plus a Supporter, so a
     // deal that works going first works going second too and need not be
@@ -306,13 +306,13 @@ function toExampleBoard(state: SimState): ExampleBoard {
   }
 }
 
-interface Deal {
+export interface Deal {
   hand: DeckCard[]
   prizes: DeckCard[]
   rest: DeckCard[]
 }
 
-interface DealOutcome {
+export interface DealOutcome {
   score: GoalScore
   frames: ExampleFrame[]
   finalState: SimState | null
@@ -328,7 +328,7 @@ interface DealOutcome {
  * Going first, the Supporter for the turn is simply already spent: as far as a
  * board is concerned, that is the whole of the rule.
  */
-function playDeal(
+export function playDeal(
   deal: Deal,
   goal: FieldGoal,
   ctx: ActionContext,
@@ -368,9 +368,16 @@ function playDeal(
     const result = searchBestLine(started, goal, ctx, labelFor, { maxNodes })
     if (!result.exhausted) hitBudget = true
     if (
-      result.score.strict !== best.strict
+      // Keep the first attempt even when it reaches nothing, so there is always
+      // an end-of-turn board to carry into the next turn.
+      finalState === null ||
+      (result.score.strict !== best.strict
         ? result.score.strict
-        : result.score.closeness > best.closeness
+        : result.score.closeness > best.closeness ||
+          // Playing on past this turn, the better-set-up opening wins a tie.
+          (ctx.multiTurn === true &&
+            result.score.closeness === best.closeness &&
+            setupScore(result.finalState, ctx) > setupScore(finalState, ctx)))
     ) {
       best = result.score
       // The setup happens either side of the search, so the deal, the

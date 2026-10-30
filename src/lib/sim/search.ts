@@ -2,7 +2,8 @@ import { scoreBoard, type FieldGoal, type GoalScore } from '../board/goal'
 import { applyAction, legalActions, type Action, type ActionContext } from './actions'
 import { describeStep } from './describe'
 import { orderActions } from './priorities'
-import { signature, toBoardView, type SimState } from './state'
+import { abilityOf } from './abilities'
+import { allInPlay, signature, toBoardView, type SimState } from './state'
 
 export interface SearchResult {
   /** The best board this hand could reach. */
@@ -34,11 +35,38 @@ export interface SearchOptions {
 
 const DEFAULT_MAX_NODES = 1_500
 
+/**
+ * How far a board is set up toward a goal it has not met yet, for breaking
+ * ties when play continues past this turn.
+ *
+ * Within one turn two boards that meet the same share of the goal are equally
+ * good. Across turns they are not: a Dreepy on the bench is a Drakloak next
+ * turn, and a Drakloak is a Dragapult ex the turn after. So each Pokémon in
+ * play from one of the goal's evolution lines counts, more the further along
+ * it is; a Pokémon whose Ability draws counts too, as it keeps digging; and
+ * cards in hand count a little, so a turn does not spend resources for
+ * nothing.
+ */
+export function setupScore(state: SimState, ctx: ActionContext): number {
+  let score = 0
+  for (const slot of allInPlay(state)) {
+    const tags = slot.card.tags
+    if (ctx.relevant.has(slot.card.key)) {
+      score += tags.includes('stage2') ? 30 : tags.includes('stage1') ? 20 : 10
+    }
+    if (abilityOf(slot.card)?.draws || abilityOf(slot.card)?.engine) score += 4
+  }
+  return score + state.hand.length * 0.5
+}
+
 /** Strict beats non-strict; otherwise more of the goal met wins. */
 function better(candidate: GoalScore, incumbent: GoalScore): boolean {
   if (candidate.strict !== incumbent.strict) return candidate.strict
   return candidate.closeness > incumbent.closeness
 }
+
+const ties = (a: GoalScore, b: GoalScore): boolean =>
+  a.strict === b.strict && a.closeness === b.closeness
 
 /**
  * Find the best board this hand can reach by the end of turn 1.
@@ -64,6 +92,7 @@ export function searchBestLine(
   const seen = new Set<string>()
 
   let best = scoreBoard(goal, toBoardView(start), labelFor)
+  let bestSetup = ctx.multiTurn ? setupScore(start, ctx) : 0
   let bestLine: Action[] = []
   let bestSteps: string[] = []
   let bestFrames: SimState[] = []
@@ -89,8 +118,10 @@ export function searchBestLine(
     nodes++
 
     const score = scoreBoard(goal, toBoardView(state), labelFor)
-    if (better(score, best)) {
+    const setup = ctx.multiTurn ? setupScore(state, ctx) : 0
+    if (better(score, best) || (ctx.multiTurn && ties(score, best) && setup > bestSetup)) {
       best = score
+      bestSetup = setup
       bestLine = line
       bestSteps = steps
       bestFrames = frames
