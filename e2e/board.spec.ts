@@ -341,3 +341,28 @@ test('marks an either/or alternative from the card popover', async ({ page }) =>
     page.getByTestId('board-parts').getByText('Fezandipiti ex or Latias ex benched'),
   ).toBeVisible({ timeout: 60_000 })
 })
+
+test('builds an either/or across zones by tapping', async ({ page }) => {
+  await openBoard(page)
+  await page.getByRole('button', { name: 'Pick Mega Kangaskhan ex' }).click()
+  await page.getByRole('button', { name: 'Place in Active spot' }).click()
+  await page.getByRole('button', { name: "Pick Ciphermaniac's Codebreaking" }).click()
+  await page.getByRole('button', { name: 'Place in Still in hand' }).click()
+  await page.getByRole('button', { name: 'Pick Area Zero Underdepths' }).click()
+  await page.getByRole('button', { name: 'Place in Stadium' }).click()
+  await page.getByRole('button', { name: 'Pick Glass Trumpet' }).click()
+  await page.getByRole('button', { name: 'Place in Still in hand' }).click()
+
+  const choices = page.getByTestId('choices')
+  await choices.getByRole('button', { name: 'Either/or across zones' }).click()
+  await page.getByRole('button', { name: "Set priority for Ciphermaniac's Codebreaking" }).click()
+  await choices.getByRole('button', { name: 'Or…' }).click()
+  await page.getByRole('button', { name: 'Set priority for Area Zero Underdepths' }).click()
+  await page.getByRole('button', { name: 'Set priority for Glass Trumpet' }).click()
+  await choices.getByRole('button', { name: 'Save' }).click()
+
+  const label =
+    "Ciphermaniac's Codebreaking still in hand, or Area Zero Underdepths in play and Glass Trumpet still in hand"
+  await expect(choices.getByText(label)).toBeVisible()
+  await expect(page.getByTestId('board-parts').getByText(label).first()).toBeVisible({ timeout: 60_000 })
+})

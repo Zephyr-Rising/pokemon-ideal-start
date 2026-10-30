@@ -67,6 +67,21 @@ export interface FieldGoal {
    * less important parts still counts as a partial success.
    */
   priorities?: Record<string, Priority>
+  /**
+   * Either/or across the board: each choice is met when every part of any one
+   * of its options is. The parts in a choice stop counting on their own.
+   */
+  choices?: BoardChoice[]
+}
+
+/**
+ * "Ciphermaniac's Codebreaking in hand, or Academy at Night in play and Kyurem
+ * in hand": options of part ids, each option met only when all of its parts
+ * are.
+ */
+export interface BoardChoice {
+  id: string
+  options: string[][]
 }
 
 export type Priority = 1 | 2 | 3
@@ -107,6 +122,7 @@ export type PartKind =
   | 'benchMin'
   | 'stadium'
   | 'hand'
+  | 'choice'
 
 /** One scorable piece of the goal. Both scores are built from these. */
 export interface GoalPart {
@@ -130,6 +146,47 @@ export interface GoalScore {
   tier: number
   /** Share of parts met, 1 when the goal is empty. */
   closeness: number
+}
+
+/**
+ * The goal's either/or choices that still apply, with options reduced to the
+ * parts that exist (a card removed from the board drops out of its option).
+ * A choice needs at least two non-empty options to be a choice at all.
+ */
+export function liveChoices(goal: FieldGoal, partIds: Set<string>): BoardChoice[] {
+  return (goal.choices ?? [])
+    .map((choice) => ({
+      ...choice,
+      options: choice.options
+        .map((option) => option.filter((id) => partIds.has(id)))
+        .filter((option) => option.length > 0),
+    }))
+    .filter((choice) => choice.options.length >= 2)
+}
+
+/** Every part id that sits inside a live choice. */
+export function choiceMembers(goal: FieldGoal, partIds: Set<string>): Set<string> {
+  return new Set(liveChoices(goal, partIds).flatMap((choice) => choice.options.flat()))
+}
+
+function foldChoices(parts: GoalPart[], goal: FieldGoal): GoalPart[] {
+  const byId = new Map(parts.map((part) => [part.id, part]))
+  const choices = liveChoices(goal, new Set(byId.keys()))
+  if (choices.length === 0) return parts
+  const members = new Set(choices.flatMap((choice) => choice.options.flat()))
+  const folded = choices.map((choice): GoalPart => {
+    const id = `choice:${choice.id}`
+    return {
+      id,
+      kind: 'choice',
+      label: choice.options
+        .map((option) => option.map((partId) => byId.get(partId)!.label).join(' and '))
+        .join(', or '),
+      met: choice.options.some((option) => option.every((partId) => byId.get(partId)!.met)),
+      priority: goal.priorities?.[id] ?? 1,
+    }
+  })
+  return [...parts.filter((part) => !members.has(part.id)), ...folded]
 }
 
 /** The priority levels a goal actually uses, most important first. */
@@ -419,6 +476,9 @@ export function scoreBoard(
   }
 
   for (const part of parts) part.priority = goal.priorities?.[part.id] ?? 1
+  // Fold the parts of each either/or choice into one part for the choice.
+  const folded = foldChoices(parts, goal)
+  parts.splice(0, parts.length, ...folded)
   const metCount = parts.filter((part) => part.met).length
   const missing = parts.filter((part) => !part.met).map((part) => part.priority)
   return {

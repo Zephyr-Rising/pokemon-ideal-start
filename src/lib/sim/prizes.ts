@@ -1,4 +1,16 @@
-import { acceptedKeys, type FieldGoal, type Priority } from '../board/goal'
+import {
+  acceptedKeys,
+  choiceMembers,
+  scoreBoard,
+  type FieldGoal,
+  type Priority,
+} from '../board/goal'
+
+/** The ids of every part of the goal, before choices fold any of them. */
+function allPartIds(goal: FieldGoal, labelFor: (cardKey: string) => string): Set<string> {
+  const empty = { active: null, bench: [], stadiumKey: null, hand: [] }
+  return new Set(scoreBoard({ ...goal, choices: [] }, empty, labelFor).parts.map((part) => part.id))
+}
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
 import { energyFits, nameOf } from './state'
@@ -49,7 +61,13 @@ export function boardRequirements(
   /** Only the parts at this priority or more important (1 is essential). */
   upTo: Priority = 3,
 ): Requirement[] {
-  const counts = (partId: string) => (goal.priorities?.[partId] ?? 1) <= upTo
+  // Parts inside an either/or choice are not checked one by one: losing one
+  // option to the prizes leaves the others, so it never makes the game
+  // impossible on its own. (Checking every option would catch more impossible
+  // games, but this never wrongly calls a possible one impossible.)
+  const members = choiceMembers(goal, allPartIds(goal, labelFor))
+  const counts = (partId: string) =>
+    !members.has(partId) && (goal.priorities?.[partId] ?? 1) <= upTo
   const byKey = new Map(cards.map((card) => [card.key, card]))
   const requirements = new Map<string, Requirement>()
   const need = (id: string, make: () => Omit<Requirement, 'needed'>, count = 1) => {

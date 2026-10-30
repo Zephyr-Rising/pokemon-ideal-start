@@ -18,6 +18,8 @@ import {
   removeTool,
   setBenchMin,
   removeSlotEnergy,
+  addChoice,
+  removeChoice,
   setPartPriority,
   toggleAlternative,
   setStadium,
@@ -104,24 +106,57 @@ export function BoardEditor({ cards, goal, onChange, horizon = 'turn1' }: Props)
   const [selected, setSelected] = useState<string | null>(null)
   const byKey = new Map([...cards, ANY_ENERGY].map((card) => [card.key, card]))
 
+  const labelFor = (key: string) => byKey.get(key)?.label ?? key
   const parts = scoreBoard(
-    goal,
+    { ...goal, choices: [] },
     { active: null, bench: [], stadiumKey: null, hand: [] },
-    (key) => byKey.get(key)?.label ?? key,
+    labelFor,
   ).parts
+  // An either/or choice being built: options of part ids, and which is open.
+  const [grouping, setGrouping] = useState<{ options: string[][]; current: number } | null>(null)
+  /** The part a card on the board stands for in a choice. */
+  const ownPart = (id: string) =>
+    id === 'stadium' ? 'stadium' : goal.inHand.some((want) => want.id === id) ? `${id}:hand` : `${id}:card`
+  const toggleInOption = (partId: string) =>
+    setGrouping((g) => {
+      if (!g) return g
+      const options = g.options.map((option, i) =>
+        i !== g.current
+          ? option.filter((id) => id !== partId)
+          : option.includes(partId)
+            ? option.filter((id) => id !== partId)
+            : [...option, partId],
+      )
+      return { ...g, options }
+    })
   /** What a card on the board needs to offer its priorities. */
   const priorityProps = (id: string) => ({
     // A card is its parts: the Pokémon, its Energy and Tools; or the Stadium;
     // or a card kept in hand.
     parts: parts.filter((part) => part.id === id || part.id.startsWith(`${id}:`)),
-    open: selected === id,
-    // Tapping a card picks priorities only when no card from the deck is
-    // waiting to be placed; then a tap attaches, as before.
-    onToggle: picked === null ? () => setSelected(selected === id ? null : id) : undefined,
+    open: grouping === null && selected === id,
+    // While building an either/or, a tap puts the card in the open option.
+    // Otherwise it opens the card's priorities — only when no card from the
+    // deck is waiting to be placed; then a tap attaches, as before.
+    onToggle:
+      grouping !== null
+        ? () => toggleInOption(ownPart(id))
+        : picked === null
+          ? () => setSelected(selected === id ? null : id)
+          : undefined,
+    group: groupState(id),
     onPriority: (partId: string, level: Priority) =>
       onChange(setPartPriority(goal, partId, level)),
     either: eitherFor(id),
   })
+
+  /** Whether this card is in the option being built, or in another one. */
+  const groupState = (id: string): 'current' | 'other' | undefined => {
+    if (!grouping) return undefined
+    const part = ownPart(id)
+    if (grouping.options[grouping.current]?.includes(part)) return 'current'
+    return grouping.options.some((option) => option.includes(part)) ? 'other' : undefined
+  }
 
   /**
    * The cards that could stand in for the one at `id`: other Pokémon for a
@@ -348,6 +383,17 @@ export function BoardEditor({ cards, goal, onChange, horizon = 'turn1' }: Props)
           </div>
         </div>
 
+        <Choices
+          goal={goal}
+          labelFor={labelFor}
+          grouping={grouping}
+          onGrouping={(next) => {
+            setSelected(null)
+            setGrouping(next)
+          }}
+          onChange={onChange}
+        />
+
         <Palette cards={cards} picked={picked} onPick={setPicked} />
       </section>
     </DndContext>
@@ -486,6 +532,7 @@ function SlotCard({
   onToggle,
   onPriority,
   either,
+  group,
 }: {
   slot?: SlotGoal
   card: DeckCard | undefined
@@ -501,6 +548,8 @@ function SlotCard({
   onToggle?: () => void
   onPriority: (partId: string, level: Priority) => void
   either: EitherOr
+  /** In the either/or option being built, or in another of its options. */
+  group?: 'current' | 'other'
 }) {
   const src = card ? cardImageUrl(card) : null
   const name = card?.label ?? 'Unknown'
@@ -513,7 +562,13 @@ function SlotCard({
     <div
       className={[
         'relative aspect-[245/342] overflow-hidden rounded-md border bg-slate-100 dark:bg-slate-800',
-        open ? 'border-sky-500 ring-2 ring-sky-400/60' : 'border-slate-200 dark:border-slate-700',
+        group === 'current'
+          ? 'border-amber-500 ring-2 ring-amber-400/70'
+          : group === 'other'
+            ? 'border-dashed border-amber-500'
+            : open
+              ? 'border-sky-500 ring-2 ring-sky-400/60'
+              : 'border-slate-200 dark:border-slate-700',
         onToggle ? 'cursor-pointer' : '',
       ].join(' ')}
       role={onToggle ? 'button' : undefined}
@@ -796,4 +851,130 @@ interface EitherOr {
   chosen: string[]
   labelFor: (cardKey: string) => string
   onToggle: (cardKey: string) => void
+}
+
+/**
+ * Either/or across the board — "Ciphermaniac's Codebreaking in hand, or
+ * Academy at Night in play and Kyurem in hand". Built by tapping: each option
+ * is the cards tapped while it is open, and the choice is met when every card
+ * of any one option is.
+ */
+function Choices({
+  goal,
+  labelFor,
+  grouping,
+  onGrouping,
+  onChange,
+}: {
+  goal: FieldGoal
+  labelFor: (cardKey: string) => string
+  grouping: { options: string[][]; current: number } | null
+  onGrouping: (next: { options: string[][]; current: number } | null) => void
+  onChange: (goal: FieldGoal) => void
+}) {
+  const empty = { active: null, bench: [], stadiumKey: null, hand: [] }
+  const parts = scoreBoard({ ...goal, choices: [] }, empty, labelFor).parts
+  const label = (partId: string) => parts.find((part) => part.id === partId)?.label ?? partId
+  const folded = scoreBoard(goal, empty, labelFor).parts.filter((part) => part.kind === 'choice')
+  const optionText = (option: string[]) => option.map(label).join(' and ')
+
+  if (parts.length < 2 && folded.length === 0) return null
+
+  return (
+    <div
+      data-testid="choices"
+      className="space-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm dark:border-slate-800 dark:bg-slate-900"
+    >
+      {folded.map((part) => (
+        <div key={part.id} className="space-y-1">
+          <div className="flex items-start justify-between gap-2">
+            <span>
+              <span className="font-medium">Either </span>
+              {part.label}
+            </span>
+            <button
+              type="button"
+              onClick={() => onChange(removeChoice(goal, part.id.slice('choice:'.length)))}
+              className="shrink-0 text-xs text-slate-500 hover:text-rose-600"
+            >
+              Remove
+            </button>
+          </div>
+          <div className="flex gap-1" role="group" aria-label={`Priority of ${part.label}`}>
+            {PRIORITY_LEVELS.map(({ level, label: name }) => (
+              <button
+                key={level}
+                type="button"
+                aria-pressed={part.priority === level}
+                onClick={() => onChange(setPartPriority(goal, part.id, level))}
+                className={[
+                  'rounded-md border px-1.5 py-0.5 text-xs',
+                  part.priority === level
+                    ? 'border-sky-500 bg-sky-50 font-medium text-sky-800 dark:bg-sky-950/40 dark:text-sky-200'
+                    : 'border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800',
+                ].join(' ')}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {grouping === null ? (
+        <button
+          type="button"
+          onClick={() => onGrouping({ options: [[]], current: 0 })}
+          className="rounded-md border border-slate-300 px-2.5 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+        >
+          Either/or across zones
+        </button>
+      ) : (
+        <div className="space-y-2 rounded-lg bg-amber-50 p-3 text-xs dark:bg-amber-950/30">
+          <p>
+            Tap the cards on the board for option {grouping.current + 1}. Each option is met when
+            all of its cards are; the choice when any option is.
+          </p>
+          <ol className="space-y-1">
+            {grouping.options.map((option, i) => (
+              <li key={i} className={i === grouping.current ? 'font-medium' : 'text-slate-500'}>
+                {i > 0 && 'or '}
+                {option.length > 0 ? optionText(option) : '(tap cards on the board)'}
+              </li>
+            ))}
+          </ol>
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              disabled={(grouping.options[grouping.current]?.length ?? 0) === 0}
+              onClick={() =>
+                onGrouping({ options: [...grouping.options, []], current: grouping.options.length })
+              }
+              className="rounded-md border border-slate-300 px-2 py-0.5 disabled:opacity-40 dark:border-slate-700"
+            >
+              Or…
+            </button>
+            <button
+              type="button"
+              disabled={grouping.options.filter((option) => option.length > 0).length < 2}
+              onClick={() => {
+                onChange(addChoice(goal, grouping.options))
+                onGrouping(null)
+              }}
+              className="rounded-md border border-sky-500 bg-sky-50 px-2 py-0.5 font-medium text-sky-800 disabled:opacity-40 dark:bg-sky-950/40 dark:text-sky-200"
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              onClick={() => onGrouping(null)}
+              className="rounded-md px-2 py-0.5 text-slate-500 hover:text-slate-800"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }

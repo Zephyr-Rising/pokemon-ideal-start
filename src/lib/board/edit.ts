@@ -189,3 +189,14 @@ export function toggleAlternative(goal: FieldGoal, id: string, cardKey: string):
   }
   return mapSlot(goal, id, (slot) => ({ ...slot, alternatives: toggle(slot.alternatives) }))
 }
+
+/** Add an either/or choice across the board: met when any option's parts all are. */
+export function addChoice(goal: FieldGoal, options: string[][]): FieldGoal {
+  const kept = options.filter((option) => option.length > 0)
+  if (kept.length < 2) return goal
+  return { ...goal, choices: [...(goal.choices ?? []), { id: nextId('choice'), options: kept }] }
+}
+
+export function removeChoice(goal: FieldGoal, id: string): FieldGoal {
+  return { ...goal, choices: (goal.choices ?? []).filter((choice) => choice.id !== id) }
+}

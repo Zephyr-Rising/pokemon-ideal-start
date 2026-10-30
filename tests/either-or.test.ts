@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
-import { toggleAlternative } from '../src/lib/board/edit'
+import { addChoice, removeChoice, toggleAlternative } from '../src/lib/board/edit'
 import { emptyGoal, scoreBoard, type BoardView, type FieldGoal } from '../src/lib/board/goal'
 import { resolveDeck } from '../src/lib/resolve-cards'
 import { playtest } from '../src/lib/sim/playtest'
@@ -74,5 +74,41 @@ describe('either/or in the simulator', () => {
     const a = playtest(cards, one, lab, { trials: 150, seed: 2 }).strict
     const b = playtest(cards, either, lab, { trials: 150, seed: 2 }).strict
     expect(b).toBeGreaterThan(a)
+  })
+})
+
+describe('either/or across zones', () => {
+  // "Ciphermaniac in hand, or Academy at Night as the Stadium and Kyurem in hand."
+  let g: FieldGoal = {
+    ...emptyGoal(),
+    active: slot('a', 'dreepy'),
+    stadiumKey: 'academy',
+    inHand: [
+      { id: 'c', cardKey: 'cipher', count: 1 },
+      { id: 'k', cardKey: 'kyurem', count: 1 },
+    ],
+  }
+  g = addChoice(g, [['c:hand'], ['stadium', 'k:hand']])
+  const score = (hand: string[], stadium: string | null) => scoreBoard(g, view('dreepy', [], hand, stadium), label)
+
+  it('is met by either option in full', () => {
+    expect(score(['cipher'], null).strict).toBe(true)
+    expect(score(['kyurem'], 'academy').strict).toBe(true)
+  })
+
+  it('is not met by half of an option', () => {
+    expect(score(['kyurem'], null).strict).toBe(false)
+    expect(score([], 'academy').strict).toBe(false)
+  })
+
+  it('folds its cards into one part, with its own label', () => {
+    const parts = score([], null).parts
+    expect(parts.map((p) => p.kind)).toEqual(['active', 'choice'])
+    expect(parts[1].label).toBe('cipher still in hand, or academy in play and kyurem still in hand')
+  })
+
+  it('needs two options to be a choice', () => {
+    expect(addChoice(emptyGoal(), [['x'], []]).choices).toBeUndefined()
+    expect(removeChoice(g, g.choices![0].id).choices).toEqual([])
   })
 })
