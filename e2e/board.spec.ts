@@ -194,8 +194,9 @@ test('attaches Energy by tapping, tucked behind the Pokémon', async ({ page }) 
 
   await page.getByRole('button', { name: 'Pick Any Energy' }).click()
   await page.getByRole('button', { name: 'Attach to Teal Mask Ogerpon ex' }).click()
-  // One Pokémon carries one Energy requirement, so mixing makes it "any".
+  // A mix stays a mix: the Grass keeps its type alongside the "any" one.
+  await expect(grass).toHaveCount(1)
   await expect(
     page.getByRole('button', { name: 'Remove one Any Energy from Teal Mask Ogerpon ex' }),
-  ).toHaveCount(2)
+  ).toHaveCount(1)
 })

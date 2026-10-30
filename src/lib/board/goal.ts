@@ -28,10 +28,13 @@ export interface BoardView {
 export interface SlotGoal {
   id: string
   cardKey: string
-  /** Energy required on this Pokémon; 0 means "don't care". */
-  energy: number
-  /** Required Energy type, or null for any type. */
-  energyType: string | null
+  /**
+   * Energy required on this Pokémon, one entry per Energy in the order it was
+   * asked for: a type symbol such as `{G}`, or null for any type. Empty means
+   * "don't care". A list rather than a count and a type, so "a Grass and one
+   * more of anything" stays exactly that.
+   */
+  energy: (string | null)[]
   /** Tools that must be attached to this Pokémon. */
   tools: string[]
 }
@@ -99,12 +102,19 @@ const toolMet = (pokemon: BoardPokemon | undefined, toolKey: string): boolean =>
 
 /** Does this Pokémon carry the Energy a slot asks for? */
 function energyMet(pokemon: BoardPokemon | undefined, slot: SlotGoal): boolean {
-  if (slot.energy === 0) return true
+  if (slot.energy.length === 0) return true
   if (!pokemon) return false
-  const matching = slot.energyType
-    ? pokemon.energy.filter((type) => type === slot.energyType)
-    : pokemon.energy
-  return matching.length >= slot.energy
+  // Typed needs claim a matching Energy each; whatever is left over can stand
+  // in for the "any" ones. Taking typed needs first is always safe, since an
+  // "any" need is happy with whatever they leave.
+  const spare = [...pokemon.energy]
+  for (const type of slot.energy) {
+    if (type === null) continue
+    const at = spare.indexOf(type)
+    if (at < 0) return false
+    spare.splice(at, 1)
+  }
+  return spare.length >= slot.energy.filter((type) => type === null).length
 }
 
 /**
@@ -131,7 +141,9 @@ function pairBench(goals: SlotGoal[], bench: BoardPokemon[]): Map<string, BoardP
   }
 
   const paired = new Map<string, BoardPokemon | undefined>()
-  const byDemand = [...goals].sort((a, b) => b.energy + b.tools.length - (a.energy + a.tools.length))
+  const byDemand = [...goals].sort(
+    (a, b) => b.energy.length + b.tools.length - (a.energy.length + a.tools.length),
+  )
   for (const goal of byDemand) {
     paired.set(goal.id, available.get(goal.cardKey)?.shift())
   }
@@ -150,14 +162,25 @@ const ENERGY_NAMES: Record<string, string> = {
 }
 
 /**
- * The Energy a slot asks for, in words: "Grass Energy", "2 Psychic Energy", or
- * "Any Energy" when the type does not matter. A lone count of 1 is dropped, as
- * "1 Grass Energy" reads worse than the card's own name.
+ * The Energy a slot asks for, in words: "Grass Energy", "2 Psychic Energy",
+ * "Any Energy", or for a mix, "Grass + 2 any Energy". A lone count of 1 is
+ * dropped where it can be, as "1 Grass Energy" reads worse than the card's own
+ * name.
  */
-export function energyPhrase(slot: Pick<SlotGoal, 'energy' | 'energyType'>): string {
-  const name = slot.energyType ? ENERGY_NAMES[slot.energyType] : undefined
-  if (!name) return slot.energy === 1 ? 'Any Energy' : `${slot.energy} Energy of any type`
-  return slot.energy === 1 ? `${name} Energy` : `${slot.energy} ${name} Energy`
+export function energyPhrase(slot: Pick<SlotGoal, 'energy'>): string {
+  const counts = new Map<string, number>()
+  for (const type of slot.energy) {
+    const name = type === null ? 'any' : (ENERGY_NAMES[type] ?? type)
+    counts.set(name, (counts.get(name) ?? 0) + 1)
+  }
+  // Typed Energy first, "any" last, as it is the leftover.
+  const groups = [...counts].sort(([a], [b]) => Number(a === 'any') - Number(b === 'any'))
+  if (groups.length === 1) {
+    const [name, n] = groups[0]
+    if (name === 'any') return n === 1 ? 'Any Energy' : `${n} Energy of any type`
+    return n === 1 ? `${name} Energy` : `${n} ${name} Energy`
+  }
+  return `${groups.map(([name, n]) => (n === 1 && name !== 'any' ? name : `${n} ${name}`)).join(' + ')} Energy`
 }
 
 /**
@@ -181,7 +204,7 @@ export function scoreBoard(
       label: `${labelFor(goal.active.cardKey)} Active`,
       met: matches,
     })
-    if (goal.active.energy > 0) {
+    if (goal.active.energy.length > 0) {
       parts.push({
         id: `${goal.active.id}:energy`,
         kind: 'activeEnergy',
@@ -209,7 +232,7 @@ export function scoreBoard(
       label: `${labelFor(slot.cardKey)} benched`,
       met: pokemon !== undefined,
     })
-    if (slot.energy > 0) {
+    if (slot.energy.length > 0) {
       parts.push({
         id: `${slot.id}:energy`,
         kind: 'benchEnergy',

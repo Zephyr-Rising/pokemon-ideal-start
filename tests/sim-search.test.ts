@@ -52,8 +52,7 @@ const state = (over: Partial<SimState> = {}): SimState => ({
 const slot = (id: string, cardKey: string, energyCount = 0): SlotGoal => ({
   id,
   cardKey,
-  energy: energyCount,
-  energyType: null,
+  energy: Array<string | null>(energyCount).fill(null),
   tools: [],
 })
 
@@ -203,5 +202,35 @@ describe('engine plays', () => {
     const result = run(s, goal({ bench: [slot('t', 'target')] }))
     expect(result.score.strict).toBe(true)
     expect(result.line.map((a) => a.kind)).toContain('useAbility')
+  })
+})
+
+describe('moving Energy around', () => {
+  const grass = (key: string) => card(key, ['energy', 'basic-energy'], { type: '{G}', name: 'Grass Energy' })
+  const energySwitch = card('energy-switch', ['item'], { name: 'Energy Switch' })
+
+  it('uses Energy Switch to move a Teal Dance Energy where the goal wants it', () => {
+    // Two Energy on x needs Teal Dance's extra attachment, which only goes on
+    // Ogerpon itself, so Energy Switch has to carry it across.
+    const ogerpon = card('ogerpon', ['pokemon', 'basic', 'ex'], {
+      name: 'Teal Mask Ogerpon ex',
+      type: '{G}',
+      retreat: 1,
+    })
+    const s = state({
+      active: inPlay(ogerpon),
+      hand: [basic('x', 1), grass('g1'), grass('g2'), energySwitch],
+      deck: [card('d', ['item'])],
+    })
+    const result = run(s, goal({ bench: [{ ...slot('b', 'x'), energy: ['{G}', '{G}'] }] }))
+    expect(result.score.strict).toBe(true)
+    expect(result.steps.some((step) => step.includes('energy-switch'))).toBe(true)
+  })
+
+  it('attaches Energy to the Active to pay its retreat, even when the goal wants none', () => {
+    const s = state({ active: inPlay(basic('a', 1)), hand: [basic('y', 1), grass('g1')] })
+    const result = run(s, goal({ active: slot('t', 'y') }))
+    expect(result.score.strict).toBe(true)
+    expect(result.line.map((a) => a.kind)).toEqual(['bench', 'attachEnergy', 'retreat'])
   })
 })

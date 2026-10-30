@@ -17,7 +17,7 @@ import {
   removeHand,
   removeTool,
   setBenchMin,
-  setSlotEnergy,
+  removeSlotEnergy,
   setStadium,
   type DropZone,
 } from '../../lib/board/edit'
@@ -91,23 +91,26 @@ export function BoardEditor({ cards, goal, onChange }: Props) {
    */
   const attachedTo = (slot: SlotGoal): AttachedCard[] => {
     const name = byKey.get(slot.cardKey)?.label ?? 'this Pokémon'
-    const type = slot.energyType
-    const deckEnergy = type
-      ? cards.find((card) => card.tags.includes('basic-energy') && card.card?.type === type)
-      : undefined
-    const record = type
-      ? (deckEnergy?.card ?? findBasicEnergyByType(type))
-      : ANY_ENERGY.card!
-    const energyLabel = deckEnergy?.label ?? record?.name ?? ANY_ENERGY.label
-    const energy = Array.from({ length: slot.energy }, (_, i) => ({
-      id: `energy-${i}`,
-      label: energyLabel,
-      src: record ? recordImageUrl(record) : null,
-      // Luminous Energy's art says "Luminous", so the edge says what it means.
-      badge: type ? undefined : 'Any',
-      removeLabel: `Remove one ${energyLabel} from ${name}`,
-      onRemove: () => onChange(setSlotEnergy(goal, slot.id, slot.energy - 1)),
-    }))
+    const energy = slot.energy.map((type, index) => {
+      const deckEnergy = type
+        ? cards.find((card) => card.tags.includes('basic-energy') && card.card?.type === type)
+        : undefined
+      const record = type
+        ? (deckEnergy?.card ?? findBasicEnergyByType(type))
+        : ANY_ENERGY.card!
+      const label = deckEnergy?.label ?? record?.name ?? ANY_ENERGY.label
+      return {
+        // Position-keyed: removing one shifts the rest, which is the honest
+        // picture, since they are interchangeable copies.
+        id: `energy-${index}`,
+        label,
+        src: record ? recordImageUrl(record) : null,
+        // Luminous Energy's art says "Luminous", so the edge says what it means.
+        badge: type ? undefined : 'Any',
+        removeLabel: `Remove one ${label} from ${name}`,
+        onRemove: () => onChange(removeSlotEnergy(goal, slot.id, index)),
+      }
+    })
     const tools = slot.tools.map((key) => {
       const card = byKey.get(key)
       const label = card?.label ?? key

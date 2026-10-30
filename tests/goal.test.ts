@@ -40,7 +40,7 @@ const slot = (
   energy = 0,
   energyType: string | null = null,
   tools: string[] = [],
-): SlotGoal => ({ id, cardKey, energy, energyType, tools })
+): SlotGoal => ({ id, cardKey, energy: Array<string | null>(energy).fill(energyType), tools })
 
 const goal = (over: Partial<FieldGoal> = {}): FieldGoal => ({ ...emptyGoal(), ...over })
 
@@ -201,12 +201,42 @@ describe('closeness', () => {
 
 describe('energyPhrase', () => {
   it('names the Energy type instead of only counting', () => {
-    expect(energyPhrase({ energy: 1, energyType: '{G}' })).toBe('Grass Energy')
-    expect(energyPhrase({ energy: 2, energyType: '{P}' })).toBe('2 Psychic Energy')
+    expect(energyPhrase({ energy: ['{G}'] })).toBe('Grass Energy')
+    expect(energyPhrase({ energy: ['{P}', '{P}'] })).toBe('2 Psychic Energy')
   })
 
   it('says "any" when the type does not matter', () => {
-    expect(energyPhrase({ energy: 1, energyType: null })).toBe('Any Energy')
-    expect(energyPhrase({ energy: 3, energyType: null })).toBe('3 Energy of any type')
+    expect(energyPhrase({ energy: [null] })).toBe('Any Energy')
+    expect(energyPhrase({ energy: [null, null, null] })).toBe('3 Energy of any type')
+  })
+
+  it('names a mix, typed Energy first', () => {
+    expect(energyPhrase({ energy: [null, '{G}'] })).toBe('Grass + 1 any Energy')
+    expect(energyPhrase({ energy: ['{G}', '{P}', '{P}', null, null] })).toBe(
+      'Grass + 2 Psychic + 2 any Energy',
+    )
+  })
+})
+
+describe('mixed Energy needs', () => {
+  const board = (energy: string[]): BoardView => ({
+    active: { cardKey: 'dreepy', energy, tools: [] },
+    bench: [],
+    stadiumKey: null,
+    hand: [],
+  })
+  const mix: SlotGoal = { id: 'a', cardKey: 'dreepy', energy: ['{G}', null], tools: [] }
+  const met = (energy: string[]) =>
+    scoreBoard(goal({ active: mix }), board(energy), (k) => k).parts.find((p) =>
+      p.id.endsWith(':energy'),
+    )!.met
+
+  it('needs the typed one, and anything at all for the rest', () => {
+    expect(met(['{G}', '{R}'])).toBe(true)
+    expect(met(['{G}', '{G}'])).toBe(true)
+    // Two Energy, but neither is Grass.
+    expect(met(['{R}', '{R}'])).toBe(false)
+    // The Grass alone cannot also count as the "any".
+    expect(met(['{G}'])).toBe(false)
   })
 })

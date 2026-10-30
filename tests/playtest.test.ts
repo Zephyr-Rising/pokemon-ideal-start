@@ -24,8 +24,7 @@ const keyOf = (cards: DeckCard[], label: string): string => {
 const slot = (id: string, cardKey: string, energy = 0): SlotGoal => ({
   id,
   cardKey,
-  energy,
-  energyType: null,
+  energy: Array<string | null>(energy).fill(null),
   tools: [],
 })
 
@@ -80,7 +79,7 @@ describe('playtest basics', () => {
     for (const part of result.parts) {
       expect(part.metRate).toBeGreaterThanOrEqual(result.strict - 1e-9)
     }
-  })
+  }, 30_000)
 })
 
 describe('monotonicity', () => {

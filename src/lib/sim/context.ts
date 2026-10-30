@@ -23,12 +23,14 @@ export function buildContext(goal: FieldGoal, rng: () => number, seed = 1): Acti
   for (const want of goal.inHand) relevant.add(want.cardKey)
 
   const energySlots = [...(goal.active ? [goal.active] : []), ...goal.bench].filter(
-    (slot) => slot.energy > 0,
+    (slot) => slot.energy.length > 0,
   )
-  const energyTypes = new Set<string>()
-  for (const slot of energySlots) {
-    if (slot.energyType) energyTypes.add(slot.energyType)
-  }
+  // Any slot happy with any type means any Energy can help, so the type
+  // filter is lifted entirely rather than narrowed.
+  const needs = energySlots.flatMap((slot) => slot.energy)
+  const energyTypes = new Set<string>(
+    needs.includes(null) ? [] : needs.filter((type): type is string => type !== null),
+  )
 
   // Which Pokémon the goal wants Energy on. Attaching anywhere else cannot
   // bring the board closer, so those plays are never generated.

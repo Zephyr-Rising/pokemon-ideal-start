@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import {
   addBench,
+  attachEnergyCard,
   addHand,
   clearActive,
   dropCard,
@@ -10,7 +11,7 @@ import {
   removeHand,
   resetIds,
   setBenchMin,
-  setSlotEnergy,
+  removeSlotEnergy,
   setStadium,
   slotTarget,
 } from '../src/lib/board/edit'
@@ -21,13 +22,15 @@ beforeEach(resetIds)
 describe('placing cards', () => {
   it('replaces the Active rather than stacking them, keeping the slot', () => {
     const first = placeActive(emptyGoal(), 'a')
-    const withEnergy = setSlotEnergy(first, first.active!.id, 2)
+    const withEnergy = attachEnergyCard(first, first.active!.id, '{G}')
     const replaced = placeActive(withEnergy, 'b')
 
     expect(replaced.active?.cardKey).toBe('b')
-    // The slot id is kept, so an Energy requirement set on it survives a swap.
+    // The slot id is kept, so Energy can still be attached to it after a swap;
+    // the new Pokémon starts clean rather than inheriting the old one's Energy.
     expect(replaced.active?.id).toBe(first.active!.id)
-    expect(setSlotEnergy(replaced, replaced.active!.id, 2).active?.energy).toBe(2)
+    expect(replaced.active?.energy).toEqual([])
+    expect(attachEnergyCard(replaced, replaced.active!.id, '{G}').active?.energy).toEqual(['{G}'])
   })
 
   it('adds a bench slot per placement, including duplicates', () => {
@@ -62,10 +65,12 @@ describe('placing cards', () => {
 
 describe('limits', () => {
   it('keeps Energy within a sane range', () => {
-    const goal = placeActive(emptyGoal(), 'a')
+    let goal = placeActive(emptyGoal(), 'a')
     const id = goal.active!.id
-    expect(setSlotEnergy(goal, id, -3).active?.energy).toBe(0)
-    expect(setSlotEnergy(goal, id, 99).active?.energy).toBe(6)
+    for (let i = 0; i < 10; i++) goal = attachEnergyCard(goal, id, null)
+    expect(goal.active?.energy).toHaveLength(6)
+    // Removing past empty is harmless.
+    expect(removeSlotEnergy(placeActive(emptyGoal(), 'a'), id, 0).active?.energy).toEqual([])
   })
 
   it('caps the bench minimum at the eight the game allows', () => {
@@ -76,9 +81,9 @@ describe('limits', () => {
   it('sets Energy on a bench slot without touching the Active', () => {
     let goal = placeActive(emptyGoal(), 'a')
     goal = addBench(goal, 'b')
-    goal = setSlotEnergy(goal, goal.bench[0].id, 2)
-    expect(goal.bench[0].energy).toBe(2)
-    expect(goal.active?.energy).toBe(0)
+    goal = attachEnergyCard(goal, goal.bench[0].id, '{G}')
+    expect(goal.bench[0].energy).toEqual(['{G}'])
+    expect(goal.active?.energy).toEqual([])
   })
 })
 
@@ -121,22 +126,31 @@ describe('drops', () => {
     const placed = placeActive(emptyGoal(), 'dreepy')
     const target = slotTarget(placed.active!.id)
     const once = dropCard(placed, target, energy('psychic', '{P}'))
-    expect(once.active?.energy).toBe(1)
-    expect(once.active?.energyType).toBe('{P}')
+    expect(once.active?.energy).toEqual(['{P}'])
 
     // A second of the same type asks for two of it.
     const twice = dropCard(once, target, energy('psychic', '{P}'))
-    expect(twice.active?.energy).toBe(2)
-    expect(twice.active?.energyType).toBe('{P}')
+    expect(twice.active?.energy).toEqual(['{P}', '{P}'])
   })
 
-  it('falls back to "any type" when Energy of two types is dropped on one Pokémon', () => {
-    // One slot cannot express "one Grass and one Fire", so it stops pinning.
+  it('keeps each type when different Energy is dropped on one Pokémon', () => {
+    // A typed Energy then an "any" one is a Grass plus one more of anything,
+    // not two of anything.
     const placed = placeActive(emptyGoal(), 'dreepy')
     const target = slotTarget(placed.active!.id)
-    const mixed = dropCard(dropCard(placed, target, energy('g', '{G}')), target, energy('r', '{R}'))
-    expect(mixed.active?.energy).toBe(2)
-    expect(mixed.active?.energyType).toBeNull()
+    const mixed = dropCard(dropCard(placed, target, energy('g', '{G}')), target, energy('any', null))
+    expect(mixed.active?.energy).toEqual(['{G}', null])
+
+    const twoTypes = dropCard(mixed, target, energy('r', '{R}'))
+    expect(twoTypes.active?.energy).toEqual(['{G}', null, '{R}'])
+  })
+
+  it('removes exactly the Energy asked for', () => {
+    const placed = placeActive(emptyGoal(), 'dreepy')
+    const id = placed.active!.id
+    const mixed = attachEnergyCard(attachEnergyCard(placed, id, '{G}'), id, null)
+    expect(removeSlotEnergy(mixed, id, 0).active?.energy).toEqual([null])
+    expect(removeSlotEnergy(mixed, id, 1).active?.energy).toEqual(['{G}'])
   })
 
   it('attaches a Tool to the Pokémon it was dropped on, once', () => {

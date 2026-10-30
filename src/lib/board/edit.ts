@@ -20,8 +20,7 @@ export const placeActive = (goal: FieldGoal, cardKey: string): FieldGoal => ({
   active: {
     id: goal.active?.id ?? nextId('active'),
     cardKey,
-    energy: 0,
-    energyType: null,
+    energy: [],
     tools: [],
   },
 })
@@ -32,7 +31,7 @@ export const addBench = (goal: FieldGoal, cardKey: string): FieldGoal => ({
   ...goal,
   bench: [
     ...goal.bench,
-    { id: nextId('bench'), cardKey, energy: 0, energyType: null, tools: [] },
+    { id: nextId('bench'), cardKey, energy: [], tools: [] },
   ],
 })
 
@@ -42,25 +41,12 @@ export const removeBench = (goal: FieldGoal, id: string): FieldGoal => ({
 })
 
 /** Change a slot's Energy requirement, whether it is the Active or a bench slot. */
-export function setSlotEnergy(goal: FieldGoal, id: string, energy: number): FieldGoal {
-  const clamped = Math.max(0, Math.min(6, energy))
-  const update = (slot: SlotGoal): SlotGoal =>
-    slot.id === id ? { ...slot, energy: clamped } : slot
-  return {
-    ...goal,
-    active: goal.active ? update(goal.active) : null,
-    bench: goal.bench.map(update),
-  }
-}
-
-export function setSlotEnergyType(goal: FieldGoal, id: string, energyType: string | null): FieldGoal {
-  const update = (slot: SlotGoal): SlotGoal =>
-    slot.id === id ? { ...slot, energyType } : slot
-  return {
-    ...goal,
-    active: goal.active ? update(goal.active) : null,
-    bench: goal.bench.map(update),
-  }
+/** Take one Energy off a slot, by its position in the slot's list. */
+export function removeSlotEnergy(goal: FieldGoal, id: string, index: number): FieldGoal {
+  return mapSlot(goal, id, (slot) => ({
+    ...slot,
+    energy: slot.energy.filter((_, i) => i !== index),
+  }))
 }
 
 /** Map a slot id onto its slot, wherever it sits. */
@@ -73,19 +59,20 @@ function mapSlot(goal: FieldGoal, id: string, update: (slot: SlotGoal) => SlotGo
   }
 }
 
+/** More Energy than this on one Pokémon is not a realistic turn-1 board. */
+const MAX_ENERGY = 6
+
 /**
  * Drop an Energy card onto a Pokémon.
  *
- * Each drop asks for one more Energy, and pins the type to the card dropped —
- * dragging a Grass Energy onto a Pokémon plainly means Grass, not "any".
+ * Each drop asks for one more Energy of the type dropped — dragging a Grass
+ * Energy onto a Pokémon plainly means Grass — and Energy already asked for
+ * keeps its own type, so a mix stays a mix.
  */
 export const attachEnergyCard = (goal: FieldGoal, id: string, energyType: string | null) =>
-  mapSlot(goal, id, (slot) => ({
-    ...slot,
-    energy: Math.min(6, slot.energy + 1),
-    // Mixing types on one slot is not expressible, so the latest drop wins.
-    energyType: slot.energy === 0 || slot.energyType === energyType ? energyType : null,
-  }))
+  mapSlot(goal, id, (slot) =>
+    slot.energy.length >= MAX_ENERGY ? slot : { ...slot, energy: [...slot.energy, energyType] },
+  )
 
 export const attachTool = (goal: FieldGoal, id: string, toolKey: string) =>
   mapSlot(goal, id, (slot) =>

@@ -82,6 +82,17 @@ function benchWorthwhile(state: SimState, ctx: ActionContext): (card: DeckCard) 
 }
 
 /**
+ * Does the Active still need Energy to retreat into the goal's Active? Only
+ * then is Energy worth putting on a Pokémon the goal never mentioned.
+ */
+function needsRetreatEnergy(state: SimState, ctx: ActionContext): boolean {
+  const active = state.active
+  if (ctx.activeKey === null || !active || state.usedRetreat) return false
+  if (active.card.key === ctx.activeKey) return false
+  return active.energy.length < retreatCost(state, active)
+}
+
+/**
  * Every play available right now.
  *
  * Nothing evolves: each Pokémon in play was put there this turn, so evolution
@@ -122,19 +133,31 @@ export function legalActions(state: SimState, ctx: ActionContext): Action[] {
     actions.push({ kind: 'useAbility', target })
   }
 
-  // Attaching Energy the goal never asked for cannot bring the board closer,
-  // and it is the single biggest source of pointless branching.
-  if (!state.usedEnergy && ctx.wantsEnergy) {
+  // This is the once-per-turn manual attachment only. Spending it on a
+  // Pokémon the goal never asked Energy for cannot bring the board closer, and
+  // it is the single biggest source of pointless branching — except to pay a
+  // retreat, since Energy on the current Active is what lets it step aside for
+  // the Pokémon the goal wants there, whatever its type.
+  //
+  // Attachments on top of this one are not limited here: Teal Dance attaches to
+  // Ogerpon itself and Crispin to any Pokémon, because that Energy can still be
+  // carried to where the goal wants it by Energy Switch.
+  const payingRetreat = needsRetreatEnergy(state, ctx)
+  if (!state.usedEnergy && (ctx.wantsEnergy || payingRetreat)) {
     const seenEnergy = new Set<string>()
     state.hand.forEach((card, handIndex) => {
       if (!isEnergy(card) || seenEnergy.has(card.key)) return
-      if (ctx.energyTypes.size > 0 && !ctx.energyTypes.has(energyType(card))) return
       seenEnergy.add(card.key)
+      const rightType = ctx.energyTypes.size === 0 || ctx.energyTypes.has(energyType(card))
       for (const target of targets(state)) {
         const slot = slotAt(state, target)!
-        // Only onto the Pokémon the goal wants Energy on, when it named any.
-        if (ctx.energyTargets.size > 0 && !ctx.energyTargets.has(slot.card.key)) continue
-        actions.push({ kind: 'attachEnergy', handIndex, target })
+        // Onto the Pokémon the goal wants Energy on, when it named any.
+        const forGoal =
+          ctx.wantsEnergy &&
+          rightType &&
+          (ctx.energyTargets.size === 0 || ctx.energyTargets.has(slot.card.key))
+        const forRetreat = payingRetreat && target === ACTIVE_TARGET
+        if (forGoal || forRetreat) actions.push({ kind: 'attachEnergy', handIndex, target })
       }
     })
   }
