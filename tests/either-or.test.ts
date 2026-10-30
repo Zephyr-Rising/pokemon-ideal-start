@@ -121,7 +121,7 @@ describe('a Pokémon wanted in hand', () => {
     const { inPlay } = await import('../src/lib/sim/state')
     const mon = (k: string) => ({ key: k, label: k, resolvedName: k, count: 1, printings: [], tags: ['pokemon', 'basic'], card: { index: 0, name: k, kind: '', rule: '', prev: '', hp: 70, type: '{W}', retreat: 1, regulationMark: '', effect: '', moves: [], tags: ['pokemon', 'basic'], image: '' } })
     const kyurem = mon('kyurem')
-    let g: FieldGoal = {
+    const g: FieldGoal = {
       ...emptyGoal(),
       active: slot('a', 'slowpoke'),
       inHand: [{ id: 'k', cardKey: 'kyurem', count: 1 }],
@@ -133,7 +133,5 @@ describe('a Pokémon wanted in hand', () => {
     const multi = { ...ctx, multiTurn: true }
     const result = searchBestLine(s as never, g, multi, (k) => k)
     expect(result.finalState.hand.map((c) => c.key)).toContain('kyurem')
-    void g
-    g = emptyGoal()
   })
 })
