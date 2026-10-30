@@ -138,6 +138,28 @@ function pairBench(goals: SlotGoal[], bench: BoardPokemon[]): Map<string, BoardP
   return paired
 }
 
+const ENERGY_NAMES: Record<string, string> = {
+  '{G}': 'Grass',
+  '{R}': 'Fire',
+  '{W}': 'Water',
+  '{L}': 'Lightning',
+  '{P}': 'Psychic',
+  '{F}': 'Fighting',
+  '{D}': 'Darkness',
+  '{M}': 'Metal',
+}
+
+/**
+ * The Energy a slot asks for, in words: "Grass Energy", "2 Psychic Energy", or
+ * "Any Energy" when the type does not matter. A lone count of 1 is dropped, as
+ * "1 Grass Energy" reads worse than the card's own name.
+ */
+export function energyPhrase(slot: Pick<SlotGoal, 'energy' | 'energyType'>): string {
+  const name = slot.energyType ? ENERGY_NAMES[slot.energyType] : undefined
+  if (!name) return slot.energy === 1 ? 'Any Energy' : `${slot.energy} Energy of any type`
+  return slot.energy === 1 ? `${name} Energy` : `${slot.energy} ${name} Energy`
+}
+
 /**
  * Score a board against the goal.
  *
@@ -163,7 +185,7 @@ export function scoreBoard(
       parts.push({
         id: `${goal.active.id}:energy`,
         kind: 'activeEnergy',
-        label: `${goal.active.energy} Energy on the Active`,
+        label: `${energyPhrase(goal.active)} on the Active`,
         // Energy only counts on the Pokémon the goal actually asked for.
         met: matches && energyMet(board.active ?? undefined, goal.active),
       })
@@ -191,7 +213,7 @@ export function scoreBoard(
       parts.push({
         id: `${slot.id}:energy`,
         kind: 'benchEnergy',
-        label: `${slot.energy} Energy on ${labelFor(slot.cardKey)}`,
+        label: `${energyPhrase(slot)} on ${labelFor(slot.cardKey)}`,
         met: energyMet(pokemon, slot),
       })
     }

@@ -249,3 +249,46 @@ describe('the simulator actually plays cards', () => {
     expect(joined).toMatch(/Play .+ — (benching|taking|drawing)/)
   }, 30_000)
 })
+
+describe('turn order', () => {
+  const cards = load('dragapult-munkidori')
+  const g = goal({
+    active: slot('a', keyOf(cards, 'Dreepy')),
+    bench: [slot('b', keyOf(cards, 'Dreepy')), slot('c', keyOf(cards, 'Munkidori'))],
+  })
+  const result = playtest(cards, g, labelFor(cards), { trials: 300, seed: 3 })
+
+  it('never does better going first, which forbids the Supporter', () => {
+    expect(result.goingFirst.strict).toBeLessThanOrEqual(result.goingSecond.strict)
+    // This deck leans on Lillie's Determination, so the gap is real.
+    expect(result.goingSecond.strict).toBeGreaterThan(result.goingFirst.strict)
+  })
+
+  it('reports the average of the two orders as the headline', () => {
+    expect(result.strict).toBeCloseTo((result.goingFirst.strict + result.goingSecond.strict) / 2, 10)
+    for (const part of result.parts) {
+      const first = result.goingFirst.parts.find((p) => p.id === part.id)!.metRate
+      const second = result.goingSecond.parts.find((p) => p.id === part.id)!.metRate
+      expect(part.metRate).toBeCloseTo((first + second) / 2, 10)
+    }
+  })
+
+  it('records exact outcomes that add up to every game', () => {
+    for (const order of [result, result.goingFirst, result.goingSecond]) {
+      const total = order.patterns.reduce((sum, p) => sum + p.rate, 0)
+      expect(total).toBeCloseTo(1, 10)
+      // The all-parts pattern is the whole board.
+      const all = order.patterns.find((p) => p.met.length === order.parts.length)?.rate ?? 0
+      expect(all).toBeCloseTo(order.strict, 10)
+    }
+  })
+
+  it('agrees with the per-part rates when outcomes are summed', () => {
+    for (const part of result.parts) {
+      const fromPatterns = result.patterns
+        .filter((p) => p.met.includes(part.id))
+        .reduce((sum, p) => sum + p.rate, 0)
+      expect(fromPatterns).toBeCloseTo(part.metRate, 10)
+    }
+  })
+}, 60_000)

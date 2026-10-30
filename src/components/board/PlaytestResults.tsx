@@ -2,9 +2,10 @@ import { useState } from 'react'
 
 import { goalIsEmpty, type FieldGoal } from '../../lib/board/goal'
 import { pct, plural } from '../../lib/format'
-import type { PlaytestExample } from '../../lib/sim/playtest'
+import type { PartStat, PlaytestExample } from '../../lib/sim/playtest'
 import type { DeckCard } from '../../lib/types'
 import type { PlaytestState } from '../../lib/use-playtest'
+import { Combinations } from './Combinations'
 import { ReplayPlayer } from './ReplayPlayer'
 
 interface Props {
@@ -58,6 +59,9 @@ export function PlaytestResults({ goal, state, trials, cards }: Props) {
                   {pct(result.strict)}
                 </div>
                 <div className="mt-1 text-sm font-medium">of games build this board</div>
+                <div className="text-xs text-slate-500">
+                  averaged over going first and going second
+                </div>
                 <div className="tnum text-xs text-slate-500">
                   ±{pct(result.margin, 1)} at 95% confidence, over{' '}
                   {result.trials.toLocaleString()} games
@@ -66,6 +70,18 @@ export function PlaytestResults({ goal, state, trials, cards }: Props) {
               </div>
 
               <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                <div>
+                  <dt className="text-xs text-slate-500">Going first</dt>
+                  <dd data-testid="going-first" className="tnum text-xl font-semibold">
+                    {pct(result.goingFirst.strict)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-slate-500">Going second</dt>
+                  <dd data-testid="going-second" className="tnum text-xl font-semibold">
+                    {pct(result.goingSecond.strict)}
+                  </dd>
+                </div>
                 <div>
                   <dt className="text-xs text-slate-500">Average closeness</dt>
                   <dd className="tnum text-xl font-semibold">{pct(result.closeness)}</dd>
@@ -82,7 +98,8 @@ export function PlaytestResults({ goal, state, trials, cards }: Props) {
               carries a margin of error. It plays out the best line each hand can manage, choosing
               the opening Active, benching, attaching and retreating as needed — and it knows which
               cards are prized when it picks that opening, which a real player would not, so treat
-              it as a mild upper bound.
+              it as a mild upper bound. Going first, it plays no Supporter on turn 1, as the rules
+              require; each game is played both ways from the same deal.
             </p>
           </div>
 
@@ -100,7 +117,13 @@ export function PlaytestResults({ goal, state, trials, cards }: Props) {
                     <li key={part.id} className="space-y-1">
                       <div className="flex items-baseline justify-between gap-2 text-sm">
                         <span className="truncate">{part.label}</span>
-                        <span className="tnum shrink-0 font-medium">{pct(part.metRate)}</span>
+                        <span className="flex shrink-0 items-baseline gap-2">
+                          <span className="tnum text-xs text-slate-500">
+                            1st {pct(rateIn(result.goingFirst.parts, part.id))} · 2nd{' '}
+                            {pct(rateIn(result.goingSecond.parts, part.id))}
+                          </span>
+                          <span className="tnum font-medium">{pct(part.metRate)}</span>
+                        </span>
                       </div>
                       <div
                         className="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"
@@ -114,6 +137,7 @@ export function PlaytestResults({ goal, state, trials, cards }: Props) {
                     </li>
                   ))}
               </ul>
+              <Combinations parts={result.parts} patterns={result.patterns} />
             </div>
           )}
 
@@ -159,6 +183,9 @@ export function PlaytestResults({ goal, state, trials, cards }: Props) {
   )
 }
 
+const rateIn = (parts: PartStat[], id: string): number =>
+  parts.find((part) => part.id === id)?.metRate ?? 0
+
 /**
  * The routes a deck took to the board, one at a time.
  *
@@ -179,6 +206,9 @@ function Routes({ examples, cards }: { examples: PlaytestExample[]; cards: DeckC
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="text-sm font-semibold">
           {example.reached ? 'How it gets there' : 'The closest it came'}
+          <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs font-normal text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+            {example.goingFirst ? 'going first' : 'going second'}
+          </span>
         </h3>
         {more && (
           <div className="flex items-center gap-2">

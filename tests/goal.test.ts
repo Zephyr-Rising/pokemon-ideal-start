@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  energyPhrase,
   emptyGoal,
   goalIsEmpty,
   scoreBoard,
@@ -195,5 +196,17 @@ describe('closeness', () => {
     const score = scoreBoard(g, board({ active: mon('dreepy') }), label)
     expect(score.closeness).toBe(0.5)
     expect(score.strict).toBe(false)
+  })
+})
+
+describe('energyPhrase', () => {
+  it('names the Energy type instead of only counting', () => {
+    expect(energyPhrase({ energy: 1, energyType: '{G}' })).toBe('Grass Energy')
+    expect(energyPhrase({ energy: 2, energyType: '{P}' })).toBe('2 Psychic Energy')
+  })
+
+  it('says "any" when the type does not matter', () => {
+    expect(energyPhrase({ energy: 1, energyType: null })).toBe('Any Energy')
+    expect(energyPhrase({ energy: 3, energyType: null })).toBe('3 Energy of any type')
   })
 })

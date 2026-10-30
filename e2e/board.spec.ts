@@ -47,9 +47,21 @@ test('builds a board by tapping, and plays it out', async ({ page }) => {
   // The result must carry its uncertainty, never present itself as exact.
   await expect(page.getByText(/at 95% confidence/)).toBeVisible()
 
-  // Both parts of the board are reported separately.
-  await expect(page.getByText('Mega Kangaskhan ex Active')).toBeVisible()
-  await expect(page.getByText('3 or more benched')).toBeVisible()
+  // Both parts of the board are reported separately. The names appear again in
+  // the collapsed outcomes table, so the first match is the parts list.
+  await expect(page.getByText('Mega Kangaskhan ex Active').first()).toBeVisible()
+  await expect(page.getByText('3 or more benched').first()).toBeVisible()
+
+  // The headline is the average of the two turn orders, which are shown too.
+  await expect(page.getByTestId('going-first')).toHaveText(/^\d{1,3}\.\d%$/)
+  await expect(page.getByTestId('going-second')).toHaveText(/^\d{1,3}\.\d%$/)
+
+  // Both combination views open on request.
+  await page.getByText('Every combination').click()
+  // With two parts the only combination is both of them.
+  await expect(page.getByTestId('combinations').getByText('All 2 parts')).toBeVisible()
+  await page.getByText('Exact outcomes').click()
+  await expect(page.getByTestId('outcomes').getByRole('table')).toBeVisible()
 
   expect(consoleErrors).toEqual([])
 })
