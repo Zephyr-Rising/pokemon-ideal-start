@@ -242,6 +242,23 @@ function energyParts(
   })
 }
 
+/**
+ * What each priority level asks for, read cumulatively: a level is met when
+ * every part at it or more important is in place. The least important level
+ * the goal uses is the whole board.
+ */
+function levelLabel(level: Priority, isWhole: boolean): string {
+  if (isWhole) return 'Whole board'
+  return level === 1 ? 'Essential parts' : 'Essential and important parts'
+}
+
+/** The levels worth a row: every level the goal uses, if it uses more than one. */
+export function priorityRows(goal: FieldGoal): { level: Priority; label: string }[] {
+  const used = usedPriorities(goal)
+  if (used.length < 2) return []
+  return used.map((level, i) => ({ level, label: levelLabel(level, i === used.length - 1) }))
+}
+
 /** The priority levels a goal actually uses, most important first. */
 export function usedPriorities(goal: FieldGoal): Priority[] {
   const levels = new Set<Priority>()

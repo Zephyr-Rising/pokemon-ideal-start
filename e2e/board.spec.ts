@@ -430,3 +430,29 @@ test('sets the priority of one Energy on a Pokémon', async ({ page }) => {
   await expect(parts.getByText('2 Grass Energy on the Active').first()).toBeVisible()
   await expect(page.getByTestId('partial-success')).toBeVisible()
 })
+
+test('shows when each priority level comes together', async ({ page }) => {
+  await stubCardArt(page)
+  await page.goto('./')
+  await page.getByRole('button', { name: 'Load example' }).click()
+  await page.getByRole('tab', { name: 'Turns to build' }).click()
+  await page.getByRole('button', { name: 'Pick Mega Kangaskhan ex' }).click()
+  await page.getByRole('button', { name: 'Place in Active spot' }).click()
+  await page.getByRole('button', { name: 'Pick Fezandipiti ex' }).click()
+  await page.getByRole('button', { name: 'Place in Bench' }).click()
+  await page.getByRole('button', { name: 'Set priority for Fezandipiti ex' }).click()
+  await page
+    .getByRole('group', { name: 'Priority of Fezandipiti ex benched' })
+    .getByRole('button', { name: 'Nice to have' })
+    .click()
+  await page.getByTestId('priority-popover').getByRole('button', { name: 'Done' }).click()
+
+  const card = page.getByTestId('turns-distribution-card')
+  const toggle = card.getByRole('group', { name: 'Priority level shown' })
+  await expect(toggle).toBeVisible({ timeout: 90_000 })
+  // The whole board by default; then the essential parts on their own.
+  await expect(toggle.getByRole('button', { name: 'Whole board' })).toHaveAttribute('aria-pressed', 'true')
+  await toggle.getByRole('button', { name: 'Essential parts' }).click()
+  await expect(toggle.getByRole('button', { name: 'Essential parts' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(card.getByText('How often essential parts first come together')).toBeVisible()
+})

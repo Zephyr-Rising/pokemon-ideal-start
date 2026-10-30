@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { goalIsEmpty, type FieldGoal } from '../../lib/board/goal'
 import { pct, plural } from '../../lib/format'
 import type { LuckStat } from '../../lib/sim/luck'
+import { priorityRows, type Priority } from '../../lib/board/goal'
 import {
   MAX_TURNS,
   type TurnsExample,
@@ -153,13 +154,7 @@ export function TurnsResults({ goal, state, cards, onFewer }: Props) {
 
           {result.parts.length > 1 && <PartTurns result={result} />}
 
-          <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-            <h3 className="text-sm font-semibold">The turn it comes together</h3>
-            <p className="mt-0.5 mb-3 text-xs text-slate-500">
-              How often the board is first complete on each turn, and how often by then.
-            </p>
-            <Distribution result={result} />
-          </div>
+          <TurnItComesTogether goal={goal} result={result} />
 
           {result.luck.factors.length > 0 && <Luck luck={result.luck} />}
 
@@ -483,6 +478,64 @@ function Luck({ luck }: { luck: LuckStat }) {
           </table>
         ))}
       </div>
+    </div>
+  )
+}
+
+/**
+ * When the board comes together, turn by turn. With priorities in use, a
+ * toggle shows the same for each level — when the essential parts come
+ * together, then the important ones, then the whole board.
+ */
+function TurnItComesTogether({ goal, result }: { goal: FieldGoal; result: TurnsResult }) {
+  const levels = priorityRows(goal)
+  const whole = levels[levels.length - 1]?.level
+  const [shown, setShown] = useState<Priority | null>(null)
+  // The whole board unless a level was picked (and is still in use).
+  const level = shown !== null && levels.some((l) => l.level === shown) ? shown : whole
+
+  const tierOf = (side: TurnsResult | TurnsResult['goingFirst']) =>
+    side.tiers.find((tier) => tier.priority === level)
+  const overall = level !== undefined && level !== whole ? tierOf(result) : undefined
+  const view =
+    overall && tierOf(result.goingFirst) && tierOf(result.goingSecond)
+      ? { ...overall, goingFirst: tierOf(result.goingFirst)!, goingSecond: tierOf(result.goingSecond)! }
+      : result
+  const what = levels.find((l) => l.level === level)?.label.toLowerCase() ?? 'the board'
+
+  return (
+    <div
+      data-testid="turns-distribution-card"
+      className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold">The turn it comes together</h3>
+        {levels.length > 1 && (
+          <div className="flex flex-wrap gap-1" role="group" aria-label="Priority level shown">
+            {levels.map(({ level: option, label }) => (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={option === level}
+                onClick={() => setShown(option)}
+                className={[
+                  'rounded-md border px-2 py-0.5 text-xs',
+                  option === level
+                    ? 'border-sky-500 bg-sky-50 font-medium text-sky-800 dark:bg-sky-950/40 dark:text-sky-200'
+                    : 'border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800',
+                ].join(' ')}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <p className="mt-0.5 mb-3 text-xs text-slate-500">
+        How often {levels.length > 1 ? what : 'the board'} first {levels.length > 1 && what.endsWith('parts') ? 'come' : 'comes'}{' '}
+        together on each turn, and how often by then.
+      </p>
+      <Distribution result={view} />
     </div>
   )
 }
