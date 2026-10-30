@@ -282,6 +282,11 @@ describe('turn order', () => {
     }
   })
 
+  it('shows a route from each turn order, first and second', () => {
+    expect(result.examples.slice(0, 2).map((e) => e.goingFirst)).toEqual([true, false])
+    expect(result.examples.every((e) => e.reached)).toBe(true)
+  })
+
   it('agrees with the per-part rates when outcomes are summed', () => {
     for (const part of result.parts) {
       const fromPatterns = result.patterns

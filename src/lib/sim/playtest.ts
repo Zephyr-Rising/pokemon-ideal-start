@@ -186,10 +186,15 @@ export function playtest(
   let deals = 0
   let truncated = 0
 
-  // Distinct successful routes, keyed so two lines that make the same plays in
-  // a different order collapse into one - otherwise "another way" would keep
-  // showing the same way reshuffled.
-  const routes = new Map<string, PlaytestExample>()
+  // Distinct successful routes per turn order, keyed so two lines that make the
+  // same plays in a different order collapse into one - otherwise "another
+  // way" would keep showing the same way reshuffled.
+  const firstRoutes = new Map<string, PlaytestExample>()
+  const secondRoutes = new Map<string, PlaytestExample>()
+  // A deal that worked going first, kept in case no game needed going second
+  // to succeed: it is replayed going second at the end so both orders can be
+  // shown.
+  let replayAsSecond: { deal: Deal; ctx: ActionContext } | null = null
   let closest: PlaytestExample | null = null
   let closestScore = -1
 
@@ -220,11 +225,11 @@ export function playtest(
     second.add(asSecond.score)
     if (asFirst.hitBudget || asSecond.hitBudget) truncated++
 
-    if (asSecond.score.strict) {
-      // Prefer a route that works going first, since it works either way.
-      const example = toExample(asFirst.score.strict ? asFirst : asSecond, asFirst.score.strict)
-      const key = `${example.goingFirst}|${[...example.steps].sort().join('|')}`
-      if (routes.size < MAX_EXAMPLES && !routes.has(key)) routes.set(key, example)
+    if (asFirst.score.strict) {
+      addRoute(firstRoutes, toExample(asFirst, true))
+      replayAsSecond ??= { deal, ctx }
+    } else if (asSecond.score.strict) {
+      addRoute(secondRoutes, toExample(asSecond, false))
     } else if (asSecond.score.closeness > closestScore) {
       closestScore = asSecond.score.closeness
       closest = toExample(asSecond, false)
@@ -233,6 +238,12 @@ export function playtest(
     if (options.onProgress && (trial + 1) % (options.progressEvery ?? 100) === 0) {
       options.onProgress(trial + 1, trials)
     }
+  }
+
+  if (secondRoutes.size === 0 && replayAsSecond) {
+    const { deal, ctx } = replayAsSecond
+    const asSecond = playDeal(deal, goal, ctx, labelFor, options.maxNodes, false)
+    if (asSecond.score.strict) addRoute(secondRoutes, toExample(asSecond, false))
   }
 
   return {
@@ -245,8 +256,28 @@ export function playtest(
     truncated,
     // Nothing succeeded anywhere? Then the closest attempt is the only thing
     // worth showing.
-    examples: routes.size > 0 ? [...routes.values()] : closest ? [closest] : [],
+    examples:
+      firstRoutes.size + secondRoutes.size > 0
+        ? interleave([...firstRoutes.values()], [...secondRoutes.values()]).slice(0, MAX_EXAMPLES)
+        : closest
+          ? [closest]
+          : [],
   }
+}
+
+function addRoute(routes: Map<string, PlaytestExample>, example: PlaytestExample): void {
+  const key = [...example.steps].sort().join('|')
+  if (routes.size < MAX_EXAMPLES && !routes.has(key)) routes.set(key, example)
+}
+
+/** Alternate two lists, so the first few entries show both. */
+function interleave<T>(a: T[], b: T[]): T[] {
+  const out: T[] = []
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if (i < a.length) out.push(a[i])
+    if (i < b.length) out.push(b[i])
+  }
+  return out
 }
 
 const toHand = (cards: DeckCard[]): ExampleCard[] =>

@@ -294,3 +294,25 @@ describe('describing a bench play', () => {
     expect(step).toBe(`Bench ${kang.label}`)
   })
 })
+
+describe('Attract Customers (Tatsugiri)', () => {
+  const tatsugiri = mon('Tatsugiri', { type: '{N}' })
+  const lillie = card("lillie's-determination", ['supporter'], { name: "Lillie's Determination" })
+
+  it('only works from the Active Spot', () => {
+    const s = state({ active: inPlay(mon('x')), bench: [inPlay(tatsugiri)], deck: [lillie] })
+    expect(abilityAvailable(s, 0)).toBe(false)
+    const active = state({ active: inPlay(tatsugiri), deck: [lillie] })
+    expect(abilityAvailable(active, ACTIVE_TARGET)).toBe(true)
+  })
+
+  it('takes a Supporter from the top 6, and only the top 6', () => {
+    const hit = state({ active: inPlay(tatsugiri), deck: [...deckOf(5), lillie] })
+    expect(useAbility(hit, ACTIVE_TARGET, ctx()).map((r) => r.hand.map((c) => c.key))).toEqual([
+      ["lillie's-determination"],
+    ])
+
+    const miss = state({ active: inPlay(tatsugiri), deck: [...deckOf(6), lillie] })
+    expect(useAbility(miss, ACTIVE_TARGET, ctx()).map((r) => r.hand.length)).toEqual([0])
+  })
+})

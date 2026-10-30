@@ -449,3 +449,69 @@ describe('cards that cannot matter on turn 1', () => {
     },
   )
 })
+
+describe('searching only the top of the deck', () => {
+  const filler = (n: number) => Array.from({ length: n }, (_, i) => trainer(`filler ${i}`, 'item'))
+  const lillie = trainer("Lillie's Determination", 'supporter')
+  const handKeys = (results: SimState[]) => results.map((r) => keys(r.hand))
+
+  it('Pokégear 3.0 takes a Supporter from the top 7', () => {
+    const s = state({ deck: [...filler(6), lillie, ...filler(5)] })
+    const results = play('Pokégear 3.0', s)
+    expect(handKeys(results)).toEqual([["lillie's-determination"]])
+    // The rest is shuffled back, so nothing else is lost.
+    expect(results[0].deck).toHaveLength(11)
+  })
+
+  it('Pokégear 3.0 misses a Supporter sitting eighth', () => {
+    const s = state({ deck: [...filler(7), lillie] })
+    const results = play('Pokégear 3.0', s)
+    expect(handKeys(results)).toEqual([[]])
+    expect(results[0].deck).toHaveLength(8)
+  })
+
+  it('Pokégear 3.0 leaves an unwanted Supporter once the turn has had one', () => {
+    const s = state({ deck: [lillie, ...filler(6)], usedSupporter: true })
+    expect(handKeys(play('Pokégear 3.0', s))).toEqual([[]])
+    // ...unless the goal wants it in hand.
+    const wanted = ctx({ relevant: new Set(["lillie's-determination"]) })
+    expect(handKeys(play('Pokégear 3.0', s, wanted))).toEqual([["lillie's-determination"]])
+  })
+
+  it('Bug Catching Set takes up to 2 Grass Pokémon or Grass Energy from the top 7', () => {
+    const s = state({
+      deck: [
+        basic('bud', 60, { type: '{G}' }),
+        basic('fire', 60, { type: '{R}' }),
+        energy('grass', '{G}'),
+        energy('grass', '{G}'),
+        ...filler(3),
+        basic('late', 60, { type: '{G}' }),
+      ],
+    })
+    const taken = handKeys(play('Bug Catching Set', s)).map((hand) => [...hand].sort().join('+'))
+    expect(taken).toEqual(
+      expect.arrayContaining(['bud', 'grass', 'bud+grass', 'grass+grass']),
+    )
+    // Never a Fire Pokémon, and never the Grass Pokémon below the top 7.
+    expect(taken.some((t) => t.includes('fire') || t.includes('late'))).toBe(false)
+  })
+
+  it('Bug Catching Set never takes two of a card the top holds only once', () => {
+    const s = state({ deck: [basic('bud', 60, { type: '{G}' }), ...filler(6)] })
+    expect(handKeys(play('Bug Catching Set', s))).toEqual([['bud']])
+  })
+})
+
+describe('Roto-Stick', () => {
+  const filler = (n: number) => Array.from({ length: n }, (_, i) => trainer(`filler ${i}`, 'item'))
+  const lillie = trainer("Lillie's Determination", 'supporter')
+  const judge = trainer('Judge', 'supporter')
+
+  it('takes every Supporter in the top 4, and nothing below', () => {
+    const s = state({ deck: [lillie, ...filler(2), judge, trainer('Boss', 'supporter')] })
+    const [after] = play('Roto-Stick', s)
+    expect(keys(after.hand).sort()).toEqual(['judge', "lillie's-determination"])
+    expect(after.deck).toHaveLength(3)
+  })
+})

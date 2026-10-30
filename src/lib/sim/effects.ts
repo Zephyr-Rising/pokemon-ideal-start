@@ -2,6 +2,7 @@ import { norm } from '../normalize'
 import type { DeckCard } from '../types'
 import { hashString, mulberry32, shuffled } from './rng'
 import { engineKeeps, engineWants } from './abilities'
+import { supporterChoices, takeFromTop, topOf } from './deck-look'
 import {
   benchCap,
   cardName,
@@ -212,6 +213,50 @@ registerEffect('Fighting Gong', (state, ctx) => {
     (isBasicEnergy(card) || isBasicPokemon(card)) && energyType(card) === '{F}'
   const found = choices(state, state.deck, fighting, ctx)
   return found.length > 0 ? found.map((card) => fetchToHand(state, card)) : [state]
+})
+
+// --- search the top of the deck ---------------------------------------------
+
+registerEffect('Pokégear 3.0', (state, ctx) => {
+  // "Look at the top 7 cards of your deck. You may reveal a Supporter card you
+  // find there and put it into your hand. Shuffle the other cards back."
+  const found = supporterChoices(state, 7, ctx)
+  // Finding nothing still shuffles the deck, which changes the next draw.
+  if (found.length === 0) return [takeFromTop(state, 7, [], ctx)]
+  return found.map((card) => takeFromTop(state, 7, [card], ctx))
+})
+
+registerEffect('Roto-Stick', (state, ctx) => {
+  // "Look at the top 4 cards of your deck. You may reveal any number of
+  // Supporter cards you find there and put them into your hand. Shuffle the
+  // other cards back." Taking every one is never worse than taking fewer, so
+  // this is one outcome rather than a branch per subset.
+  const supporters = topOf(state, 4).filter((card) => card.tags.includes('supporter'))
+  return [takeFromTop(state, 4, supporters, ctx)]
+})
+
+registerEffect('Bug Catching Set', (state, ctx) => {
+  // "Look at the top 7 cards of your deck. You may reveal up to 2 in any
+  // combination of {G} Pokémon and Basic {G} Energy cards you find there and
+  // put them into your hand. Shuffle the other cards back."
+  const grass = (card: DeckCard) =>
+    (isPokemon(card) || isBasicEnergy(card)) && energyType(card) === '{G}'
+  const top = topOf(state, 7)
+  const found = choices(state, top, grass, ctx)
+  if (found.length === 0) return [takeFromTop(state, 7, [], ctx)]
+
+  // Up to 2: each single pick, and each pair the top actually holds (a pair of
+  // the same card needs two copies there).
+  const out: SimState[] = []
+  found.forEach((a, i) => {
+    out.push(takeFromTop(state, 7, [a], ctx))
+    for (const b of found.slice(i)) {
+      const copies = top.filter((card) => card.key === b.key).length
+      if (b.key === a.key && copies < 2) continue
+      out.push(takeFromTop(state, 7, [a, b], ctx))
+    }
+  })
+  return out
 })
 
 registerEffect('Poké Pad', (state, ctx) => {

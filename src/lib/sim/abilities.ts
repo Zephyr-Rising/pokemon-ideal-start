@@ -1,5 +1,6 @@
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
+import { supporterChoices, takeFromTop } from './deck-look'
 import type { EffectContext } from './effects'
 import {
   ACTIVE_TARGET,
@@ -350,6 +351,19 @@ register("Erika's Tangela", {
     const found = distinct(wanted.length > 0 ? wanted : erikas)
     if (found.length === 0) return [state]
     return found.map((card) => fetch(state, card))
+  },
+})
+
+// "Once during your turn, if this Pokémon is in the Active Spot, you may look at
+// the top 6 cards of your deck, reveal a Supporter card you find there, and put
+// it into your hand. Shuffle the other cards back into your deck."
+register('Tatsugiri', {
+  ability: 'Attract Customers',
+  activeOnly: true,
+  apply: (state, _target, ctx) => {
+    const found = supporterChoices(state, 6, ctx)
+    if (found.length === 0) return [takeFromTop(state, 6, [], ctx)]
+    return found.map((card) => takeFromTop(state, 6, [card], ctx))
   },
 })
 
