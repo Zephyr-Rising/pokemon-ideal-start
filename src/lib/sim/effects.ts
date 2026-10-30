@@ -1,6 +1,6 @@
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
-import { abilityOf, engineKeeps, engineWants, onEvolve } from './abilities'
+import { abilityOf, drawsWhileActive, engineKeeps, engineWants, onEvolve } from './abilities'
 import { attackOf } from './attacks'
 import { distinctCards, supporterChoices, takeFromTop, topOf } from './deck-look'
 import {
@@ -926,6 +926,18 @@ export function worthSwitching(state: SimState, incoming: DeckCard, ctx: EffectC
   // A Pokémon whose attack searches the deck is worth bringing in to use it,
   // goal or no goal — Celebi stepping up to find the Stage 2 lines.
   if (!state.attacked && !state.cannotAttack && attackOf(incoming) && !attackOf(state.active.card)) {
+    return true
+  }
+  // A Pokémon that draws from the Active Spot (Mega Kangaskhan ex) is worth
+  // promoting while the spot is not the goal Active's: this turn if its Ability
+  // is unspent, and, looking past this turn, for the draws every turn after.
+  if (
+    drawsWhileActive(incoming) &&
+    !drawsWhileActive(state.active.card) &&
+    !ctx.activeLineage?.has(state.active.card.key) &&
+    state.active.card.key !== ctx.activeKey &&
+    (ctx.multiTurn === true || !state.usedAbilities.includes(nameOf(incoming)))
+  ) {
     return true
   }
   if (ctx.activeKey === null) return false

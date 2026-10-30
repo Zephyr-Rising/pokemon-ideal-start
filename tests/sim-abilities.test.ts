@@ -8,7 +8,7 @@ import {
 } from '../src/lib/sim/abilities'
 import { applyAction, legalActions } from '../src/lib/sim/actions'
 import { describeStep } from '../src/lib/sim/describe'
-import { lookupEffect, type EffectContext } from '../src/lib/sim/effects'
+import { lookupEffect, worthSwitching, type EffectContext } from '../src/lib/sim/effects'
 import { ACTIVE_TARGET, inPlay, retreatCost, type SimState } from '../src/lib/sim/state'
 import type { CardRecord, DeckCard } from '../src/lib/types'
 
@@ -104,6 +104,26 @@ describe('Run Errand (Mega Kangaskhan ex)', () => {
     const [after] = useAbility(s, ACTIVE_TARGET, ctx())
     expect(after.hand).toHaveLength(1)
     expect(after.deck).toHaveLength(0)
+  })
+  it('is worth promoting to the Active Spot while Run Errand is unspent', () => {
+    const s = state({ active: inPlay(mon('Other')), bench: [inPlay(kang)], deck: deckOf(5) })
+    expect(worthSwitching(s, kang, ctx())).toBe(true)
+    // Already used this turn, only a game played on past it gains anything.
+    const spent = { ...s, usedAbilities: ['mega kangaskhan ex'] }
+    expect(worthSwitching(spent, kang, ctx())).toBe(false)
+    expect(worthSwitching(spent, kang, ctx({ multiTurn: true }))).toBe(true)
+  })
+
+  it('is not promoted over the goal Active', () => {
+    const goal = mon('Slowking')
+    const s = state({ active: inPlay(goal), bench: [inPlay(kang)], deck: deckOf(5) })
+    expect(worthSwitching(s, kang, ctx({ activeKey: goal.key, multiTurn: true }))).toBe(false)
+  })
+
+  it('offers a retreat into it', () => {
+    const s = state({ active: inPlay(mon('Other', { retreat: 0 })), bench: [inPlay(kang)], deck: deckOf(5) })
+    const actions = legalActions(s, { ...ctx(), wantsAnyBench: false })
+    expect(actions).toContainEqual({ kind: 'retreat', benchIndex: 0 })
   })
 })
 

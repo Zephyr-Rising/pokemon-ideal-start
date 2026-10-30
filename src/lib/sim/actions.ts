@@ -3,6 +3,7 @@ import type { DeckCard } from '../types'
 import {
   abilityAvailable,
   abilityOf,
+  drawsWhileActive,
   engineBenches,
   onBenchPlay,
   onEvolve,
@@ -127,6 +128,9 @@ function benchWorthwhile(state: SimState, ctx: ActionContext): (card: DeckCard) 
       // play in progress (Dunsparce, N's Zorua).
       (ctx.multiTurn === true && ctx.drawEvolutionBases?.has(nameOf(card)) === true) ||
       (ctx.activeKey !== null && abilityOf(card)?.switchesActive === true) ||
+      // Looking past this turn, a Pokémon that draws from the Active Spot,
+      // benched ready to be promoted (Mega Kangaskhan ex).
+      (ctx.multiTurn === true && drawsWhileActive(card)) ||
       // A Pokémon whose attack searches the deck, ready to step up.
       attackOf(card) !== undefined
     )
@@ -170,8 +174,11 @@ function attackNeedsEnergy(state: SimState): boolean {
  */
 function needsRetreatEnergy(state: SimState, ctx: ActionContext): boolean {
   const active = state.active
-  if (ctx.activeKey === null || !active || state.usedRetreat) return false
-  if (!state.bench.some((slot) => worthSwitching(state, slot.card, ctx))) return false
+  if (!active || state.usedRetreat) return false
+  const into = state.bench.filter((slot) => worthSwitching(state, slot.card, ctx))
+  // Without a goal Active, only promoting a drawer (Mega Kangaskhan ex) counts.
+  if (ctx.activeKey === null && !into.some((slot) => drawsWhileActive(slot.card))) return false
+  if (into.length === 0) return false
   return active.energy.length < retreatCost(state, active)
 }
 

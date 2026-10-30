@@ -110,6 +110,15 @@ const hasInPlay = (state: SimState, name: string) =>
 const holdsEnergy = (state: SimState, type: string) =>
   state.hand.some((card) => isBasicEnergy(card) && energyType(card) === type)
 
+/**
+ * A Pokémon that draws every turn it sits in the Active Spot — Mega Kangaskhan
+ * ex's Run Errand. Promoting one is worth a retreat or a Switch.
+ */
+export function drawsWhileActive(card: DeckCard): boolean {
+  const def = abilityOf(card)
+  return def?.activeOnly === true && def.draws === true
+}
+
 /** Mark an Ability as spent for the turn. */
 function spend(state: SimState, target: number): SimState {
   const next = cloneState(state)
@@ -325,6 +334,7 @@ export function engineKeeps(state: SimState): Set<number> {
 register('Mega Kangaskhan ex', {
   ability: 'Run Errand',
   activeOnly: true,
+  draws: true,
   apply: (state) => [drawInto(state, 2)],
 })
 

@@ -2,7 +2,7 @@ import { scoreBoard, type FieldGoal, type GoalScore } from '../board/goal'
 import { applyAction, legalActions, type Action, type ActionContext } from './actions'
 import { describeStep } from './describe'
 import { orderActions } from './priorities'
-import { abilityOf, engineKeeps } from './abilities'
+import { abilityOf, drawsWhileActive, engineKeeps } from './abilities'
 import {
   ACTIVE_TARGET,
   allInPlay,
@@ -103,6 +103,9 @@ export function setupScore(state: SimState, ctx: ActionContext): number {
     const def = abilityOf(slot.card)
     if (def?.draws || def?.engine || (ctx.wantsEnergy && def?.accelerates)) score += 4
   }
+  // A Pokémon drawing from the Active Spot keeps drawing every turn it stays
+  // there (Mega Kangaskhan ex).
+  if (state.active && drawsWhileActive(state.active.card)) score += 6
   return score + state.hand.length * 0.5
 }
 
