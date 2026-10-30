@@ -131,6 +131,70 @@ function keepRank(card: DeckCard, ctx: EffectContext): number {
   return 0
 }
 
+/**
+ * How much a card in hand is worth keeping when a cost makes you discard,
+ * lowest pitched first.
+ *
+ * Measured on the benchmark boards, Ultra Ball used to pitch Lillie's
+ * Determination and Forest of Vitality more than anything, because every card
+ * the goal did not name ranked the same. A real player pitches the dead cards
+ * and keeps the outs — the cards that turn a bad hand around:
+ *
+ *   -1  a Trainer the simulator cannot play (Boss's Orders, Crushing Hammer)
+ *    0  anything else
+ *  0.5  Energy a ready accelerator can put straight back into play
+ *    1  what the goal generally wants (its Energy, Basics for a bench count)
+ *  1.5  outs: a playable Supporter or Item (Rare Candy too), a Stadium that
+ *       helps, a Pokémon that draws, searches or accelerates, an engine piece
+ *    2  a card the goal names
+ *
+ * On turn 1 alone an out ranks 0.75 instead, below the goal's generic cards,
+ * and only counts if it can still be played this turn (a second Supporter is
+ * dead there). Across turns, everything playable later is an out.
+ */
+function discardRank(
+  card: DeckCard,
+  state: SimState,
+  ctx: EffectContext,
+  recovers: (card: DeckCard) => boolean,
+  enginePiece: boolean,
+): number {
+  if (ctx.relevant.has(card.key)) return 2
+  // Across turns an out outranks generic goal cards: it is what turns a bad
+  // hand around next turn. Within turn 1 the search can play an out before
+  // paying the cost anyway, so there it only beats cards the goal cannot use.
+  if (enginePiece || isOut(card, state, ctx)) return ctx.multiTurn ? 1.5 : 0.75
+  const goal = keepRank(card, ctx)
+  if (goal > 0) return recovers(card) ? 0.5 : goal
+  if (recovers(card)) return 0.5
+  const trainer = ['item', 'supporter', 'stadium', 'tool'].some((tag) => card.tags.includes(tag))
+  return trainer && !isImplemented(card) ? -1 : 0
+}
+
+/** A card that can still turn the game: see `discardRank`. */
+function isOut(card: DeckCard, state: SimState, ctx: EffectContext): boolean {
+  const later = ctx.multiTurn === true
+  if (card.tags.includes('supporter')) return isImplemented(card) && (later || !state.usedSupporter)
+  if (card.tags.includes('item')) return isImplemented(card)
+  if (card.tags.includes('stadium')) {
+    const name = nameOf(card)
+    const helps =
+      (name === norm('Forest of Vitality') && ctx.wantsGrassEvolution === true) ||
+      (name === norm('Area Zero Underdepths') && ctx.wantsAnyBench)
+    return helps && (later || !state.usedStadium)
+  }
+  if (card.tags.includes('pokemon')) {
+    const def = abilityOf(card)
+    return (
+      def?.draws === true ||
+      def?.engine !== undefined ||
+      (ctx.wantsEnergy && def?.accelerates === true) ||
+      attackOf(card) !== undefined
+    )
+  }
+  return false
+}
+
 /** Does the goal have any use for this card at all? */
 const useful = (card: DeckCard, ctx: EffectContext): boolean => keepRank(card, ctx) > 0
 
@@ -189,11 +253,7 @@ export function payDiscard(
     .map((card, index) => ({
       card,
       index,
-      keep: recovers(card)
-        ? // An accelerator can put it straight back: pitch it before anything
-          // the goal needs, but after outright junk.
-          0.5
-        : Math.max(keepRank(card, ctx), engine.has(index) ? 1 : 0),
+      keep: discardRank(card, state, ctx, recovers, engine.has(index)),
     }))
     .sort((a, b) => a.keep - b.keep || a.index - b.index)
   for (const entry of ranked.slice(0, count)) next.discard.push(entry.card)
