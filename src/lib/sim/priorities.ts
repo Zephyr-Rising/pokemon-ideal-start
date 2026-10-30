@@ -94,6 +94,10 @@ export function actionPriority(state: SimState, action: Action, ctx: ActionConte
     case 'attachTool':
       return TIER.tool + relevant
 
+    case 'attack':
+      // It ends the turn, so everything else is tried first.
+      return TIER.end + 100
+
     case 'retreat': {
       // Retreating matters when the goal names a specific Active; otherwise it
       // mostly burns Energy.

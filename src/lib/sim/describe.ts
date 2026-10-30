@@ -1,5 +1,6 @@
 import type { DeckCard } from '../types'
 import { abilityOf } from './abilities'
+import { attackOf } from './attacks'
 import type { Action } from './actions'
 import { ACTIVE_TARGET, cardName, energyType, type SimState } from './state'
 
@@ -181,6 +182,12 @@ export function describeStep(before: SimState, after: SimState, action: Action):
 
     case 'retreat':
       return `Retreat into ${label(after.active!.card)}`
+
+    case 'attack': {
+      const name = attackOf(before.active!.card)?.name ?? 'an attack'
+      const used = `Attack with ${label(before.active!.card)}'s ${name}`
+      return drawn.length > 0 ? `${used} — taking ${list(drawn)}` : used
+    }
 
     case 'end':
       return 'End the turn'

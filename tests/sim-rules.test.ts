@@ -298,6 +298,38 @@ describe('goal-driven pruning', () => {
     expect(benched(s, narrow({ wantsAnyBench: true }))).toEqual(['goal', 'spare'])
   })
 
+  it('keeps bench space for the Pokémon the board still needs', () => {
+    // The goal wants two 'oger' and one of the 'chik'/'meg' line on the Bench.
+    // Both 'oger' are down, so only the 'meg' line still claims a slot. A
+    // third 'oger' may have a slot only if one is left over after that.
+    const benched = (s: SimState, c: ActionContext) =>
+      legalActions(s, c)
+        .filter((a) => a.kind === 'bench')
+        .map((a) => s.hand[(a as { handIndex: number }).handIndex].key)
+    const lines = {
+      goalLines: [
+        { keys: new Set(['oger']), needed: 2 },
+        { keys: new Set(['chik', 'meg']), needed: 1 },
+      ],
+      relevant: new Set(['oger', 'chik', 'meg']),
+    }
+    const full = state({
+      active: inPlay(basic('a')),
+      bench: [inPlay(basic('oger')), inPlay(basic('oger')), inPlay(basic('x')), inPlay(basic('y'))],
+      hand: [basic('oger'), basic('chik')],
+    })
+    // One slot left, and the 'meg' line needs it: only Chikorita may take it.
+    expect(benched(full, narrow(lines))).toEqual(['chik'])
+
+    const roomy = state({
+      active: inPlay(basic('a')),
+      bench: [inPlay(basic('oger')), inPlay(basic('oger'))],
+      hand: [basic('oger'), basic('chik')],
+    })
+    // Three slots, one claimed: a spare 'oger' is fine too.
+    expect(benched(roomy, narrow(lines))).toEqual(['oger', 'chik'])
+  })
+
   it('benches a draw engine and its partner even when the goal names neither', () => {
     const lunatone = card('lunatone', ['pokemon', 'basic'], { name: 'Lunatone', type: '{F}' })
     const solrock = card('solrock', ['pokemon', 'basic'], { name: 'Solrock', type: '{F}' })

@@ -1,5 +1,5 @@
 import type { DeckCard } from '../types'
-import type { EffectContext } from './effects'
+import { isPlayableSupporter, type EffectContext } from './effects'
 import { cloneState, fairShuffle, shufflesAfter, type SimState } from './state'
 
 /**
@@ -60,5 +60,5 @@ export function supporterChoices(
   const supporters = distinctCards(topOf(state, count).filter((card) => card.tags.includes('supporter')))
   const wanted = supporters.filter((card) => ctx.relevant.has(card.key))
   if (wanted.length > 0) return wanted
-  return state.usedSupporter ? [] : supporters
+  return state.usedSupporter ? [] : supporters.filter(isPlayableSupporter)
 }

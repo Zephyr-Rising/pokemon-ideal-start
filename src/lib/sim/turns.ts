@@ -199,6 +199,7 @@ function turnsToBuild(
       usedEnergy: false,
       // Going first, the turn's Supporter is simply already spent.
       usedSupporter: goingFirst,
+      cannotAttack: goingFirst,
       usedStadium: false,
       usedRetreat: false,
       usedAbilities: [],

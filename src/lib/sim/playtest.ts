@@ -364,6 +364,7 @@ export function playDeal(
       stadium: null,
       usedEnergy: false,
       usedSupporter: goingFirst,
+      cannotAttack: goingFirst,
       usedStadium: false,
       usedRetreat: false,
       usedAbilities: [],

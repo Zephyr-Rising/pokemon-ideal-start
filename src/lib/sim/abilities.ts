@@ -1,7 +1,7 @@
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
 import { supporterChoices, takeFromTop } from './deck-look'
-import { choices, payDiscard, type EffectContext } from './effects'
+import { choices, isPlayableSupporter, payDiscard, type EffectContext } from './effects'
 import {
   ACTIVE_TARGET,
   benchCap,
@@ -317,15 +317,14 @@ register('Meowth ex', {
   ability: 'Last-Ditch Catch',
   onBenchPlay: true,
   engine: {
-    worthIt: (state) =>
-      !state.usedSupporter && state.deck.some((card) => card.tags.includes('supporter')),
+    worthIt: (state) => !state.usedSupporter && state.deck.some(isPlayableSupporter),
   },
   apply: (state, _target, ctx) => {
     const supporters = state.deck.filter((card) => card.tags.includes('supporter'))
     const wanted = supporters.filter((card) => ctx.relevant.has(card.key))
-    // With no Supporter the goal names, any will do — a Supporter in hand is
-    // what this Ability is for, and the line may still find a use for it.
-    const found = distinct(wanted.length > 0 ? wanted : supporters)
+    // With no Supporter the goal names, any the simulator can play will do — a
+    // Supporter in hand is what this Ability is for.
+    const found = distinct(wanted.length > 0 ? wanted : supporters.filter(isPlayableSupporter))
     if (found.length === 0) return [state]
     return found.map((card) => fetch(state, card))
   },
@@ -336,6 +335,8 @@ register('Meowth ex', {
 // your one attachment for the turn.
 register('Teal Mask Ogerpon ex', {
   ability: 'Teal Dance',
+  // Each Ogerpon has its own; nothing on the card caps it across copies.
+  perCopy: true,
   engine: { fuel: (card) => isBasicEnergy(card) && energyType(card) === '{G}' },
   usable: (state) => holdsEnergy(state, '{G}'),
   apply: (state, target) => {
@@ -471,6 +472,41 @@ register("N's Zoroark ex", {
   },
 })
 
+// "Once during your turn, you may attach a Basic {G} Energy card from your hand
+// to 1 of your Pokémon. If you attached Energy to a Pokémon in this way, heal
+// 30 damage from that Pokémon." An attachment on top of the turn's own.
+register('Hydrapple ex', {
+  ability: 'Ripening Charge',
+  perCopy: true,
+  usable: (state) => holdsEnergy(state, '{G}'),
+  apply: (state, _target, ctx) => {
+    const at = state.hand.findIndex((card) => isBasicEnergy(card) && energyType(card) === '{G}')
+    if (at < 0) return []
+    // Where it helps: a Pokémon the goal wants Energy on (or an earlier stage
+    // of one), else anywhere the goal names. Identical Pokémon tried once.
+    const wants = ctx.energyLineage ?? ctx.energyTargets
+    const slots = [
+      ...(state.active ? [{ slot: state.active, target: ACTIVE_TARGET }] : []),
+      ...state.bench.map((slot, target) => ({ slot, target })),
+    ]
+    const useful = slots.filter(({ slot }) =>
+      ctx.wantsEnergy ? wants.size === 0 || wants.has(slot.card.key) : ctx.relevant.has(slot.card.key),
+    )
+    const seen = new Set<string>()
+    const out: SimState[] = []
+    for (const { slot, target } of useful) {
+      const same = `${target === ACTIVE_TARGET ? 'A' : 'B'}${slot.card.key}+${slot.energy.length}`
+      if (seen.has(same)) continue
+      seen.add(same)
+      const next = cloneState(state)
+      const [energy] = next.hand.splice(at, 1)
+      slotAt(next, target)!.energy.push(energy)
+      out.push(next)
+    }
+    return out
+  },
+})
+
 // "Once during your turn, if your Active Pokémon has the Festival Lead Ability,
 // you may search your deck for a card and put it into your hand. Then, shuffle
 // your deck." Dipplin, Seaking, Goldeen and Swirlix carry Festival Lead.
@@ -485,7 +521,7 @@ register('Thwackey', {
     // the goal wants or an engine needs, else a Supporter still to be played.
     let found = choices(state, state.deck, () => true, ctx)
     if (found.length === 0 && !state.usedSupporter) {
-      found = distinct(state.deck.filter((card) => card.tags.includes('supporter')))
+      found = distinct(state.deck.filter(isPlayableSupporter))
     }
     // Searching for nothing is not a play.
     return found.map((card) => {

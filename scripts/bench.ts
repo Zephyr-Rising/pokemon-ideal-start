@@ -95,6 +95,21 @@ const CASES: Case[] = [
         bench: [slot(keyOf(c, 'Thwackey')), slot(keyOf(c, 'Lilligant'))],
       }),
   },
+  {
+    name: 'hydrapple turns: Hydrapple ex + Grass, 2 Ogerpon with 2 Grass, Meganium',
+    deck: 'hydrapple',
+    mode: 'turns',
+    trials: 30,
+    build: (c) =>
+      goal({
+        active: slot(keyOf(c, 'Hydrapple ex'), ['{G}']),
+        bench: [
+          slot(keyOf(c, 'Teal Mask Ogerpon ex'), ['{G}', '{G}']),
+          slot(keyOf(c, 'Teal Mask Ogerpon ex'), ['{G}', '{G}']),
+          slot(keyOf(c, 'Meganium')),
+        ],
+      }),
+  },
 ]
 
 const filter = process.argv[2]?.toLowerCase()

@@ -55,6 +55,10 @@ export interface SimState {
   turn?: number
   /** Shuffles so far this game, which picks the next shuffle's order. */
   shuffles?: number
+  /** This turn's attack has been made, which ends the turn. */
+  attacked?: boolean
+  /** No attack this turn: the player going first, on their first turn. */
+  cannotAttack?: boolean
 }
 
 /** Target index convention: -1 is the Active Spot, 0+ indexes the bench. */
@@ -204,6 +208,8 @@ export function cloneState(state: SimState): SimState {
     usedAbilities: state.usedAbilities,
     turn: state.turn,
     shuffles: state.shuffles,
+    attacked: state.attacked,
+    cannotAttack: state.cannotAttack,
   }
 }
 
@@ -236,6 +242,7 @@ export function signature(state: SimState): string {
     state.usedAbilities.length > 1 ? [...state.usedAbilities].sort().join(',') : state.usedAbilities.join(''),
     state.turn ?? 1,
     state.shuffles ?? 0,
+    state.attacked ? 'x' : '',
   ].join('|')
 }
 
@@ -347,6 +354,8 @@ export function startNextTurn(state: SimState): SimState {
   next.usedStadium = false
   next.usedRetreat = false
   next.usedAbilities = []
+  next.attacked = false
+  next.cannotAttack = false
   for (const slot of [...(next.active ? [next.active] : []), ...next.bench]) {
     slot.fresh = false
     slot.usedAbility = false

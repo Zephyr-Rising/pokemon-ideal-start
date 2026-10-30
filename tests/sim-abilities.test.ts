@@ -6,7 +6,7 @@ import {
   onBenchPlay,
   useAbility,
 } from '../src/lib/sim/abilities'
-import { applyAction } from '../src/lib/sim/actions'
+import { applyAction, legalActions } from '../src/lib/sim/actions'
 import { describeStep } from '../src/lib/sim/describe'
 import { lookupEffect, type EffectContext } from '../src/lib/sim/effects'
 import { ACTIVE_TARGET, inPlay, retreatCost, type SimState } from '../src/lib/sim/state'
@@ -411,5 +411,72 @@ describe('Boom Boom Groove (Thwackey)', () => {
   it('is not a play when there is nothing worth taking', () => {
     const s = state({ active: inPlay(dipplin), bench: [inPlay(thwackey)], deck: deckOf(5), usedSupporter: true })
     expect(useAbility(s, 0, ctx({ wantsAnyBench: false, wantsEnergy: false }))).toEqual([])
+  })
+})
+
+describe('Traverse Time (Celebi), an attack that searches', () => {
+  const traverse = { name: 'Traverse Time', cost: '{G}', damage: '', effect: '' }
+  const celebi = mon('Celebi', { type: '{G}', moves: [traverse] })
+  const grassMon = (name: string, prev = '') =>
+    card(name.toLowerCase(), ['pokemon', prev ? 'stage1' : 'basic'], { name, type: '{G}', prev })
+  const applin = grassMon('Applin')
+  const dipplin = grassMon('Dipplin', 'Applin')
+  const chikorita = grassMon('Chikorita')
+  const fire = card('fire-mon', ['pokemon', 'basic'], { name: 'Fire Mon', type: '{R}' })
+  const wanted = ctx({ relevant: new Set(['applin', 'dipplin', 'chikorita', 'fire-mon']) })
+  const powered = () => ({ ...inPlay(celebi), energy: [energy('{G}')] })
+  const legal = (s: SimState, c = wanted) =>
+    legalActions(s, { ...c, wantsAnyBench: false } as never).map((a) => a.kind)
+
+  it('needs its Energy cost on the Active Pokémon', () => {
+    expect(legal(state({ active: inPlay(celebi), deck: [applin] }))).not.toContain('attack')
+    expect(legal(state({ active: powered(), deck: [applin] }))).toContain('attack')
+  })
+
+  it('cannot be used by the player going first on their first turn', () => {
+    expect(legal(state({ active: powered(), deck: [applin], cannotAttack: true }))).not.toContain('attack')
+  })
+
+  it('takes up to three Grass Pokémon, the next stage of a line in play first, and ends the turn', () => {
+    const s = state({
+      active: powered(),
+      bench: [{ ...inPlay(applin), fresh: false }],
+      deck: [fire, chikorita, dipplin, ...deckOf(3)],
+    })
+    const [after] = applyAction(s, { kind: 'attack' }, wanted as never)
+    expect(after.hand.map((c) => c.key)).toEqual(['dipplin', 'chikorita'])
+    expect(after.attacked).toBe(true)
+    expect(legal(after)).toEqual(['end'])
+  })
+})
+
+describe('Ripening Charge (Hydrapple ex) and Teal Dance per copy', () => {
+  const hydrapple = mon('Hydrapple ex', { type: '{G}' })
+  const ogerpon = mon('Teal Mask Ogerpon ex', { type: '{G}' })
+
+  it('attaches a Grass Energy from hand to a Pokémon the goal wants it on', () => {
+    const s = state({
+      active: inPlay(hydrapple),
+      bench: [inPlay(ogerpon)],
+      hand: [energy('{G}')],
+    })
+    const c = ctx({ wantsEnergy: true, energyTargets: new Set([ogerpon.key]) })
+    const results = useAbility(s, ACTIVE_TARGET, c)
+    expect(results).toHaveLength(1)
+    expect(results[0].bench[0].energy).toHaveLength(1)
+    // On top of the turn's own attachment.
+    expect(results[0].usedEnergy).toBe(false)
+  })
+
+  it('lets each Ogerpon use its own Teal Dance in the same turn', () => {
+    const s = state({
+      active: inPlay(ogerpon),
+      bench: [inPlay(ogerpon)],
+      hand: [energy('{G}'), energy('{G}')],
+      deck: deckOf(4),
+    })
+    const [after] = useAbility(s, ACTIVE_TARGET, ctx())
+    expect(abilityAvailable(after, ACTIVE_TARGET)).toBe(false)
+    expect(abilityAvailable(after, 0)).toBe(true)
   })
 })

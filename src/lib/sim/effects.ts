@@ -1,6 +1,7 @@
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
 import { engineKeeps, engineWants, onEvolve } from './abilities'
+import { attackOf } from './attacks'
 import { distinctCards, supporterChoices, takeFromTop, topOf } from './deck-look'
 import {
   benchCap,
@@ -61,6 +62,11 @@ export interface EffectContext {
    * evolutions short of the goal each is (0 for the goal card itself).
    */
   activeLineage?: Map<string, number>
+  /**
+   * The Pokémon the goal places, by evolution line: the line's card keys and
+   * how many of that line the goal wants in play. Bench space is kept for them.
+   */
+  goalLines?: { keys: Set<string>; needed: number }[]
   /** Basics in this deck that evolve into a Pokémon with a draw Ability. */
   drawEvolutionBases?: Set<string>
   /** Playing over several turns, so setting up for a later turn counts. */
@@ -85,6 +91,14 @@ export function lookupEffect(card: DeckCard): CardEffect | undefined {
 }
 
 export const isImplemented = (card: DeckCard): boolean => lookupEffect(card) !== undefined
+
+/**
+ * A Supporter worth fetching when none is named: one whose effect the
+ * simulator can play. Fetching Boss's Orders "for later" is a fetch spent on a
+ * card that will never do anything here.
+ */
+export const isPlayableSupporter = (card: DeckCard): boolean =>
+  card.tags.includes('supporter') && isImplemented(card)
 
 /** Normalised names of every card the simulator knows how to play. */
 export const implementedCardNames = (): string[] => [...EFFECTS.keys()].sort()
@@ -539,7 +553,13 @@ registerEffect('Switch', (state, ctx) => {
  * identical Drakloak, does nothing a player would do.
  */
 export function worthSwitching(state: SimState, incoming: DeckCard, ctx: EffectContext): boolean {
-  if (ctx.activeKey === null || !state.active) return false
+  if (!state.active) return false
+  // A Pokémon whose attack searches the deck is worth bringing in to use it,
+  // goal or no goal — Celebi stepping up to find the Stage 2 lines.
+  if (!state.attacked && !state.cannotAttack && attackOf(incoming) && !attackOf(state.active.card)) {
+    return true
+  }
+  if (ctx.activeKey === null) return false
   // Without the deck's evolution lines to hand, the goal's Active is the line.
   const lineage = ctx.activeLineage?.size ? ctx.activeLineage : new Map([[ctx.activeKey, 0]])
   const to = lineage.get(incoming.key)

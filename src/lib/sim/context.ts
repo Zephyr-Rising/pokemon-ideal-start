@@ -66,6 +66,26 @@ export function buildContext(
     }
   }
 
+  // Each Pokémon the goal places, grouped by evolution line: the line's cards
+  // (the goal card and its earlier stages) and how many of it the goal wants.
+  // Two Ogerpon slots are one line wanting two.
+  const lineOfKey = (key: string): Set<string> => {
+    const line = new Set([key])
+    const top = cards.find((c) => c.key === key)
+    let prev = top?.card?.prev ? norm(top.card.prev) : null
+    for (let depth = 0; prev && depth < 2; depth++) {
+      for (const earlier of byName.get(prev) ?? []) line.add(earlier.key)
+      prev = prevOf.get(prev) ?? null
+    }
+    return line
+  }
+  const goalLines = new Map<string, { keys: Set<string>; needed: number }>()
+  for (const slot of [...(goal.active ? [goal.active] : []), ...goal.bench]) {
+    const entry = goalLines.get(slot.cardKey) ?? { keys: lineOfKey(slot.cardKey), needed: 0 }
+    entry.needed++
+    goalLines.set(slot.cardKey, entry)
+  }
+
   let wantsGrassEvolution = false
   for (const key of [...relevant]) {
     const card = cards.find((c) => c.key === key)
@@ -118,6 +138,7 @@ export function buildContext(
     activeKey: goal.active?.cardKey ?? null,
     prevOf,
     activeLineage,
+    goalLines: [...goalLines.values()],
     wantsGrassEvolution,
     drawEvolutionBases,
     rng,

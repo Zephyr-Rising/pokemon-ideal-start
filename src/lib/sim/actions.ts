@@ -8,8 +8,10 @@ import {
   onEvolve,
   useAbility,
 } from './abilities'
+import { attack, attackAvailable, attackOf, costPaid } from './attacks'
 import { lookupEffect, worthSwitching, type EffectContext } from './effects'
 import {
+  allInPlay,
   ACTIVE_TARGET,
   benchCap,
   nameOf,
@@ -48,6 +50,7 @@ export type Action =
   | { kind: 'playStadium'; handIndex: number }
   | { kind: 'useAbility'; target: number }
   | { kind: 'evolve'; handIndex: number; target: number }
+  | { kind: 'attack' }
   | { kind: 'retreat'; benchIndex: number }
   | { kind: 'end' }
 
@@ -92,14 +95,60 @@ const FOREST = norm('Forest of Vitality')
  */
 function benchWorthwhile(state: SimState, ctx: ActionContext): (card: DeckCard) => boolean {
   const forEngine = engineBenches(state)
-  return (card) =>
-    ctx.relevant.has(card.key) ||
-    ctx.wantsAnyBench ||
-    forEngine(card) ||
-    // Looking past this turn, a Basic that evolves into a draw engine is a
-    // play in progress (Dunsparce, N's Zorua).
-    (ctx.multiTurn === true && ctx.drawEvolutionBases?.has(nameOf(card)) === true) ||
-    (ctx.activeKey !== null && abilityOf(card)?.switchesActive === true)
+  const room = benchRoom(state, ctx)
+  return (card) => {
+    // Any body will do for a bench count.
+    if (ctx.wantsAnyBench) return true
+    // A Pokémon of a line the goal still needs fills a slot it asked for.
+    const line = ctx.goalLines?.find((l) => l.keys.has(card.key))
+    if (line) {
+      if (countInPlay(state, line.keys) < line.needed) return true
+    } else if (ctx.relevant.has(card.key)) {
+      return true
+    }
+    // Anything else — a third Ogerpon, an engine, a spare — only into a slot
+    // the goal does not need: bench space is a resource, and one filled now
+    // can leave no room for the Pokémon the board is built around.
+    if (room.spare <= 0) return false
+    return (
+      line !== undefined ||
+      forEngine(card) ||
+      // Looking past this turn, a Basic that evolves into a draw engine is a
+      // play in progress (Dunsparce, N's Zorua).
+      (ctx.multiTurn === true && ctx.drawEvolutionBases?.has(nameOf(card)) === true) ||
+      (ctx.activeKey !== null && abilityOf(card)?.switchesActive === true) ||
+      // A Pokémon whose attack searches the deck, ready to step up.
+      attackOf(card) !== undefined
+    )
+  }
+}
+
+/** How many of these cards are in play. */
+const countInPlay = (state: SimState, keys: Set<string>): number =>
+  allInPlay(state).filter((slot) => keys.has(slot.card.key)).length
+
+/**
+ * Bench slots left over once every Pokémon the goal still needs has a place.
+ *
+ * The goal's lines that are not yet in play each claim a slot (the Active's
+ * line too, since it often starts on the Bench); what remains is free for
+ * anything else.
+ */
+function benchRoom(state: SimState, ctx: ActionContext): { spare: number } {
+  const free = benchCap(state) - state.bench.length
+  let claimed = 0
+  for (const line of ctx.goalLines ?? []) {
+    claimed += Math.max(0, line.needed - countInPlay(state, line.keys))
+  }
+  return { spare: free - claimed }
+}
+
+/** Is the Active's searching attack usable but for its Energy cost? */
+function attackNeedsEnergy(state: SimState): boolean {
+  const active = state.active
+  if (!active || state.attacked || state.cannotAttack) return false
+  const found = attackOf(active.card)
+  return found !== undefined && !costPaid(found.cost, active)
 }
 
 /**
@@ -133,6 +182,9 @@ export function legalActions(state: SimState, ctx: ActionContext): Action[] {
     return actions
   }
 
+  // An attack ends the turn; nothing can follow it.
+  if (state.attacked) return [{ kind: 'end' }]
+
   const seenBench = new Set<string>()
   const room = benchCap(state) - state.bench.length
   const worthBenching = benchWorthwhile(state, ctx)
@@ -164,7 +216,7 @@ export function legalActions(state: SimState, ctx: ActionContext): Action[] {
   // Ogerpon itself and Crispin to any Pokémon, because that Energy can still be
   // carried to where the goal wants it by Energy Switch.
   const payingRetreat = needsRetreatEnergy(state, ctx)
-  if (!state.usedEnergy && (ctx.wantsEnergy || payingRetreat)) {
+  if (!state.usedEnergy && (ctx.wantsEnergy || payingRetreat || attackNeedsEnergy(state))) {
     const seenEnergy = new Set<string>()
     state.hand.forEach((card, handIndex) => {
       if (!isEnergy(card) || seenEnergy.has(card.key)) return
@@ -184,7 +236,11 @@ export function legalActions(state: SimState, ctx: ActionContext): Action[] {
           rightType &&
           (ctx.energyTargets.size === 0 || ctx.energyTargets.has(slot.card.key))
         const forRetreat = payingRetreat && target === ACTIVE_TARGET
-        if (forGoal || forRetreat) actions.push({ kind: 'attachEnergy', handIndex, target })
+        // Or onto an Active whose searching attack still needs it paid.
+        const forAttack = target === ACTIVE_TARGET && attackNeedsEnergy(state)
+        if (forGoal || forRetreat || forAttack) {
+          actions.push({ kind: 'attachEnergy', handIndex, target })
+        }
       }
     })
   }
@@ -245,7 +301,7 @@ export function legalActions(state: SimState, ctx: ActionContext): Action[] {
 
   // Retreating only changes which Pokémon is Active, so it is only worth it
   // into one further along the goal Active's evolution line.
-  if (ctx.activeKey !== null && !state.usedRetreat && state.bench.length > 0 && state.active) {
+  if (!state.usedRetreat && state.bench.length > 0 && state.active) {
     const cost = retreatCost(state, state.active)
     if (state.active.energy.length >= cost) {
       const seenTarget = new Set<string>()
@@ -256,6 +312,10 @@ export function legalActions(state: SimState, ctx: ActionContext): Action[] {
       })
     }
   }
+
+  // An attack that searches the deck builds the board; it ends the turn, so it
+  // is ordered last among the plays.
+  if (attackAvailable(state)) actions.push({ kind: 'attack' })
 
   actions.push({ kind: 'end' })
   return actions
@@ -293,6 +353,9 @@ export function applyAction(state: SimState, action: Action, ctx: ActionContext)
 
     case 'useAbility':
       return useAbility(state, action.target, ctx)
+
+    case 'attack':
+      return attack(state, ctx)
 
     case 'evolve': {
       const { card, next } = take(state, action.handIndex)

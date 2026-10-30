@@ -551,3 +551,11 @@ describe('Rare Candy', () => {
     expect(play('Rare Candy', s, lines)).toEqual([s])
   })
 })
+
+describe('fetching a Supporter nobody named', () => {
+  it('takes one the simulator can play, never a card that would do nothing', () => {
+    const s = state({ deck: [trainer("Boss's Orders", 'supporter'), trainer('Judge', 'supporter'), ...Array.from({ length: 5 }, (_, i) => trainer(`f${i}`, 'item'))] })
+    const results = play('Pokégear 3.0', s, ctx({ wantsAnyBench: false, wantsEnergy: false }))
+    expect(results.map((r) => keys(r.hand))).toEqual([['judge']])
+  })
+})

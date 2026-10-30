@@ -131,7 +131,8 @@ function closingAttachment(
   state: SimState,
   ctx: ActionContext,
 ): { action: Action; next: SimState } | null {
-  if (state.usedEnergy || !state.active) return null
+  // Nothing follows an attack; the search attaches before attacking instead.
+  if (state.usedEnergy || state.attacked || !state.active) return null
   const keep = engineKeeps(state)
   const choices = state.hand
     .map((card, handIndex) => ({ card, handIndex }))
@@ -260,8 +261,18 @@ export function searchBestLine(
     for (const action of orderActions(state, legalActions(state, ctx), ctx)) {
       // Ending the turn adds no board; this state has already been scored.
       if (action.kind === 'end') continue
-      for (const next of applyAction(state, action, ctx)) {
-        visit(next, { action, before: state, after: next, previous: step }, depth + 1)
+      // An attack ends the turn, so the turn's Energy goes down first.
+      let from = state
+      let lead = step
+      if (action.kind === 'attack') {
+        const closing = closingAttachment(state, ctx)
+        if (closing) {
+          lead = { action: closing.action, before: state, after: closing.next, previous: step }
+          from = closing.next
+        }
+      }
+      for (const next of applyAction(from, action, ctx)) {
+        visit(next, { action, before: from, after: next, previous: lead }, depth + 1)
         if (done()) return
       }
     }
