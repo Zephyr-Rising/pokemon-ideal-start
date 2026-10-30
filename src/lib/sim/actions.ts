@@ -1,6 +1,6 @@
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
-import { abilityAvailable, abilityOf, onBenchPlay, useAbility } from './abilities'
+import { abilityAvailable, abilityOf, engineBenches, onBenchPlay, useAbility } from './abilities'
 import { lookupEffect, type EffectContext } from './effects'
 import {
   ACTIVE_TARGET,
@@ -64,6 +64,24 @@ const stadiumWorthPlaying = (card: DeckCard, ctx: ActionContext): boolean =>
   ctx.relevant.has(card.key) || (ctx.wantsAnyBench && norm(cardName(card)) === AREA_ZERO)
 
 /**
+ * Is benching this Pokémon worth a bench slot?
+ *
+ * Bench space is a resource: a Pokémon benched for nothing is a slot the deck
+ * cannot use later, and in the line of play it reads as a mistake. So a Basic
+ * is only benched when the goal wants it (by name, or any body for a bench
+ * count), or when a play needs it there to continue — a draw engine and its
+ * partner, or a Pokémon whose Ability can switch the goal's Active in.
+ */
+function benchWorthwhile(state: SimState, ctx: ActionContext): (card: DeckCard) => boolean {
+  const forEngine = engineBenches(state)
+  return (card) =>
+    ctx.relevant.has(card.key) ||
+    ctx.wantsAnyBench ||
+    forEngine(card) ||
+    (ctx.activeKey !== null && abilityOf(card)?.switchesActive === true)
+}
+
+/**
  * Every play available right now.
  *
  * Nothing evolves: each Pokémon in play was put there this turn, so evolution
@@ -85,9 +103,10 @@ export function legalActions(state: SimState, ctx: ActionContext): Action[] {
 
   const seenBench = new Set<string>()
   const room = benchCap(state) - state.bench.length
+  const worthBenching = benchWorthwhile(state, ctx)
   state.hand.forEach((card, handIndex) => {
     // Copies of a card are interchangeable, so only the first is branched on.
-    if (room > 0 && isBasicPokemon(card) && !seenBench.has(card.key)) {
+    if (room > 0 && isBasicPokemon(card) && !seenBench.has(card.key) && worthBenching(card)) {
       seenBench.add(card.key)
       actions.push({ kind: 'bench', handIndex })
     }

@@ -282,6 +282,34 @@ describe('goal-driven pruning', () => {
     ).toContain('playStadium')
   })
 
+  it('treats bench space as a resource, benching only what a play needs', () => {
+    const benched = (s: SimState, c: ActionContext) =>
+      legalActions(s, c)
+        .filter((a) => a.kind === 'bench')
+        .map((a) => s.hand[(a as { handIndex: number }).handIndex].key)
+
+    const s = state({ active: inPlay(basic('a')), hand: [basic('goal'), basic('spare')] })
+    // Only the Pokémon the goal names...
+    expect(benched(s, narrow({ relevant: new Set(['goal']) }))).toEqual(['goal'])
+    // ...unless the goal wants bodies on the bench, when any Basic will do.
+    expect(benched(s, narrow({ wantsAnyBench: true }))).toEqual(['goal', 'spare'])
+  })
+
+  it('benches a draw engine and its partner even when the goal names neither', () => {
+    const lunatone = card('lunatone', ['pokemon', 'basic'], { name: 'Lunatone', type: '{F}' })
+    const solrock = card('solrock', ['pokemon', 'basic'], { name: 'Solrock', type: '{F}' })
+    const fighting = card('f', ['energy', 'basic-energy'], { name: 'f', type: '{F}' })
+    const s = state({
+      active: inPlay(basic('a')),
+      hand: [lunatone, solrock, fighting, basic('spare')],
+      deck: [basic('x'), basic('y'), basic('z')],
+    })
+    const kinds = legalActions(s, narrow({}))
+      .filter((a) => a.kind === 'bench')
+      .map((a) => s.hand[(a as { handIndex: number }).handIndex].key)
+    expect(kinds).toEqual(['lunatone', 'solrock'])
+  })
+
   it('still plays Area Zero Underdepths when the goal wants a big bench', () => {
     // It is the only way past five, so it matters even unnamed.
     const area = card('area', ['stadium'], { name: 'Area Zero Underdepths' })

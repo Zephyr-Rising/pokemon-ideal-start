@@ -243,6 +243,18 @@ export function engineWants(state: SimState): (card: DeckCard) => boolean {
 }
 
 /**
+ * Pokémon a draw engine needs on the Bench this turn: the engine Pokémon or
+ * its partner, while that engine can still run. Benching one of these spends a
+ * bench slot on a play that is going somewhere.
+ */
+export function engineBenches(state: SimState): (card: DeckCard) => boolean {
+  const pieces = liveEngines(state)
+    .flat()
+    .filter((piece) => piece.needsBench)
+  return (card) => pieces.some((piece) => piece.is(card))
+}
+
+/**
  * Indices of hand cards that a draw engine is counting on, so a discard cost
  * pitches something else first. One copy per piece: a second {F} Energy is
  * not needed for Lunar Cycle, so it is as expendable as any other card.
