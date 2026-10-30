@@ -49,10 +49,10 @@ test('builds a board by tapping, and plays it out', async ({ page }) => {
   // The result must carry its uncertainty, never present itself as exact.
   await expect(page.getByText(/at 95% confidence/)).toBeVisible()
 
-  // Both parts of the board are reported separately. The names appear again in
-  // the collapsed outcomes table, so the first match is the parts list.
-  await expect(page.getByText('Mega Kangaskhan ex Active').first()).toBeVisible()
-  await expect(page.getByText('3 or more benched').first()).toBeVisible()
+  // Both parts of the board are reported separately.
+  const parts = page.getByTestId('board-parts')
+  await expect(parts.getByText('Mega Kangaskhan ex Active').first()).toBeVisible()
+  await expect(parts.getByText('3 or more benched').first()).toBeVisible()
 
   // The headline is the average of the two turn orders, which are shown too.
   await expect(page.getByTestId('going-first')).toHaveText(/^\d{1,3}\.\d%$/)
@@ -275,6 +275,28 @@ test('builds a board with a Tool on it', async ({ page }) => {
   await page.getByRole('button', { name: 'Attach to Grookey' }).click()
 
   // The Tool is part of the board, and some games build it.
-  await expect(page.getByText('Air Balloon on the Active').first()).toBeVisible({ timeout: 60_000 })
+  await expect(
+    page.getByTestId('board-parts').getByText('Air Balloon on the Active').first(),
+  ).toBeVisible({ timeout: 60_000 })
   await expect(page.getByTestId('playtest-probability')).not.toHaveText('0.0%')
+})
+
+test('reports partial success once a part is less than essential', async ({ page }) => {
+  await openBoard(page)
+  await page.getByRole('button', { name: 'Pick Mega Kangaskhan ex' }).click()
+  await page.getByRole('button', { name: 'Place in Active spot' }).click()
+  await page.getByRole('button', { name: 'Pick Fezandipiti ex' }).click()
+  await page.getByRole('button', { name: 'Place in Bench' }).click()
+
+  const priorities = page.getByTestId('priorities')
+  await priorities.getByText('Priorities').click()
+  await priorities
+    .getByRole('group', { name: 'Priority of Fezandipiti ex benched' })
+    .getByRole('button', { name: 'Nice to have' })
+    .click()
+
+  const partial = page.getByTestId('partial-success')
+  await expect(partial).toBeVisible({ timeout: 60_000 })
+  await expect(partial.getByText('Essential parts')).toBeVisible()
+  await expect(partial.getByText('Whole board')).toBeVisible()
 })

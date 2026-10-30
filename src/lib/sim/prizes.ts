@@ -1,4 +1,4 @@
-import type { FieldGoal } from '../board/goal'
+import type { FieldGoal, Priority } from '../board/goal'
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
 import { energyKind, nameOf } from './state'
@@ -46,7 +46,10 @@ export function boardRequirements(
   goal: FieldGoal,
   cards: DeckCard[],
   labelFor: (cardKey: string) => string,
+  /** Only the parts at this priority or more important (1 is essential). */
+  upTo: Priority = 3,
 ): Requirement[] {
+  const counts = (partId: string) => (goal.priorities?.[partId] ?? 1) <= upTo
   const byKey = new Map(cards.map((card) => [card.key, card]))
   const requirements = new Map<string, Requirement>()
   const need = (id: string, make: () => Omit<Requirement, 'needed'>, count = 1) => {
@@ -57,6 +60,7 @@ export function boardRequirements(
 
   const slots = [...(goal.active ? [goal.active] : []), ...goal.bench]
   for (const slot of slots) {
+    if (!counts(`${slot.id}:card`)) continue
     // The goal card itself, by its exact printing — that is what is scored.
     need(`card:${slot.cardKey}`, () => ({
       label: labelFor(slot.cardKey),
@@ -78,7 +82,9 @@ export function boardRequirements(
       const earlier = cards.find((card) => nameOf(card) === name)
       prev = earlier?.card?.prev ? norm(earlier.card.prev) : null
     }
-
+  }
+  for (const slot of slots) {
+    if (!counts(`${slot.id}:energy`)) continue
     for (const kind of slot.energy) {
       if (kind === null) continue
       const special = byKey.get(kind)
@@ -87,7 +93,10 @@ export function boardRequirements(
         matches: (card) => card.tags.includes('energy') && energyKind(card) === kind,
       }))
     }
+  }
+  for (const slot of slots) {
     for (const toolKey of slot.tools) {
+      if (!counts(`${slot.id}:tool:${toolKey}`)) continue
       need(`card:${toolKey}`, () => ({
         label: labelFor(toolKey),
         matches: (card) => card.key === toolKey,
@@ -96,15 +105,18 @@ export function boardRequirements(
   }
 
   // All the Energy the board asks for, of any kind.
-  const totalEnergy = slots.reduce((sum, slot) => sum + slot.energy.length, 0)
+  const totalEnergy = slots
+    .filter((slot) => counts(`${slot.id}:energy`))
+    .reduce((sum, slot) => sum + slot.energy.length, 0)
   if (totalEnergy > 0) {
     need('energy:total', () => ({ label: 'Energy', matches: (card) => card.tags.includes('energy') }), totalEnergy)
   }
-  if (goal.stadiumKey) {
+  if (goal.stadiumKey && counts('stadium')) {
     const key = goal.stadiumKey
     need(`card:${key}`, () => ({ label: labelFor(key), matches: (card) => card.key === key }))
   }
   for (const want of goal.inHand) {
+    if (!counts(`${want.id}:hand`)) continue
     need(
       `card:${want.cardKey}`,
       () => ({ label: labelFor(want.cardKey), matches: (card) => card.key === want.cardKey }),

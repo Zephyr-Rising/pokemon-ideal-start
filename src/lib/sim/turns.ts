@@ -1,4 +1,4 @@
-import { goalIsEmpty, type FieldGoal, type GoalScore } from '../board/goal'
+import { goalIsEmpty, type FieldGoal, type GoalScore, type Priority } from '../board/goal'
 import type { DeckCard } from '../types'
 import { draw, type ActionContext } from './actions'
 import { buildContext } from './context'
@@ -92,6 +92,11 @@ export interface TurnsPartStat extends TurnsOrderResult {
 /** One turn order's figures, for the whole board and each part of it. */
 export interface TurnsOrderDetail extends TurnsOrderResult {
   parts: TurnsPartStat[]
+  /**
+   * Partial success: for each priority level, when every part at that level
+   * or more important is in place. Level 3 is the whole board.
+   */
+  tiers: (TurnsOrderResult & { priority: Priority })[]
 }
 
 export interface TurnsResult extends TurnsOrderDetail {
@@ -263,11 +268,16 @@ function gameOutcome(
   truncatedSearches: number,
 ): GameOutcome {
   const parts = new Map<string, { label: string; turn: number | null }>()
+  // The first turn each priority level was fully met; [k] is level k.
+  const tierTurns: (number | null)[] = [null, null, null, null]
   for (const step of branch?.history ?? []) {
     for (const part of step.line.score.parts) {
       const entry = parts.get(part.id) ?? { label: part.label, turn: null }
       if (part.met && entry.turn === null) entry.turn = step.turn
       parts.set(part.id, entry)
+    }
+    for (let level = 1; level <= 3; level++) {
+      if (step.line.score.tier >= level && tierTurns[level] === null) tierTurns[level] = step.turn
     }
   }
   return {
@@ -276,6 +286,7 @@ function gameOutcome(
     searches,
     truncatedSearches,
     parts,
+    tierTurns,
     history: branch?.history ?? [],
   }
 }
@@ -320,6 +331,8 @@ interface GameOutcome {
   truncatedSearches: number
   /** The turn each part first came together, or null. */
   parts: Map<string, { label: string; turn: number | null }>
+  /** The turn each priority level was first fully met; [k] is level k. */
+  tierTurns: (number | null)[]
   /** The shown game's turns, as the search left them. */
   history: BranchTurn[]
 }
@@ -331,9 +344,15 @@ class TurnTally {
   readonly parts = new Map<string, { label: string; counts: number[] }>()
   /** Games the prizes made impossible: never built, and not played. */
   locked = 0
+  /** Per priority level, how many games first met it on each turn; [k] is level k. */
+  readonly tierCounts = [emptyCounts(), emptyCounts(), emptyCounts(), emptyCounts()]
 
   add(game: GameOutcome): void {
     if (game.turn !== null) this.counts[game.turn - 1]++
+    for (let level = 1; level <= 3; level++) {
+      const turn = game.tierTurns[level]
+      if (turn !== null) this.tierCounts[level][turn - 1]++
+    }
     for (const [id, part] of game.parts) {
       const entry = this.parts.get(id) ?? { label: part.label, counts: emptyCounts() }
       if (part.turn !== null) entry.counts[part.turn - 1]++
@@ -349,6 +368,11 @@ class TurnTally {
         id,
         label: part.label,
         ...summarise(part.counts.map((count) => count / Math.max(trials - this.locked, 1))),
+      })),
+      // Over every game, like the whole board: prize-locked games miss.
+      tiers: ([1, 2, 3] as const).map((priority) => ({
+        priority,
+        ...summarise(this.tierCounts[priority].map((count) => count / trials)),
       })),
     }
   }
@@ -388,7 +412,7 @@ export function turnsTest(
   const deck = physicalDeck(cards)
   const ignored = ignoredCards(cards)
 
-  const none: TurnsOrderDetail = { ...summarise(emptyCounts()), parts: [] }
+  const none: TurnsOrderDetail = { ...summarise(emptyCounts()), parts: [], tiers: [] }
   const blank: TurnsResult = {
     ...none,
     trials: 0,
@@ -407,7 +431,11 @@ export function turnsTest(
 
   const first = new TurnTally()
   const second = new TurnTally()
+  // The whole board, for reporting games it could never reach; and only its
+  // essential parts, since a game that could still reach those is worth
+  // playing for a partial success.
   const requirements = boardRequirements(goal, cards, labelFor)
+  const essentials = boardRequirements(goal, cards, labelFor, 1)
   const locked = new PrizeLockTally()
   const examples = new Map<string, TurnsExample>()
   // The goal's pieces never change between deals, so they are worked out once.
@@ -433,8 +461,8 @@ export function turnsTest(
     // A board the prizes have already made impossible is logged as such and
     // not played — it could only ever run all six turns and miss.
     const locks = prizeLocks(requirements, deck, deal.prizes)
-    if (locks.length > 0) {
-      locked.add(locks)
+    if (locks.length > 0) locked.add(locks)
+    if (locks.length > 0 && prizeLocks(essentials, deck, deal.prizes).length > 0) {
       first.locked++
       second.locked++
       // Never built, in either turn order.
@@ -483,6 +511,10 @@ export function turnsTest(
       id: part.id,
       label: part.label,
       ...summarise(averageTurns(part.byTurn, secondParts.get(part.id)?.byTurn ?? emptyCounts())),
+    })),
+    tiers: goingFirst.tiers.map((tier, i) => ({
+      priority: tier.priority,
+      ...summarise(averageTurns(tier.byTurn, goingSecond.tiers[i].byTurn)),
     })),
   }
   return {

@@ -6,6 +6,7 @@ import type { PartStat, PlaytestExample } from '../../lib/sim/playtest'
 import type { DeckCard } from '../../lib/types'
 import type { PlaytestState } from '../../lib/use-playtest'
 import { Combinations } from './Combinations'
+import { PartialSuccessRates } from './PartialSuccess'
 import { PrizeNote } from './PrizeNote'
 import { ReplayPlayer } from './ReplayPlayer'
 import { SimulationProgress } from './SimulationProgress'
@@ -108,11 +109,15 @@ export function PlaytestResults({ goal, state, cards, onFewer }: Props) {
               it as a mild upper bound. Going first, it plays no Supporter on turn 1, as the rules
               require; each game is played both ways from the same deal.
             </p>
+            <PartialSuccessRates goal={goal} tiers={result.tiers} />
             <PrizeNote locked={result.prizeLocked} reached={result.strict} what="build it" />
           </div>
 
           {result.parts.length > 0 && (
-            <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+            <div
+              data-testid="board-parts"
+              className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"
+            >
               <h3 className="text-sm font-semibold">Each part of the board</h3>
               <p className="mt-0.5 mb-3 text-xs text-slate-500">
                 How often each piece comes together on its own

@@ -161,14 +161,18 @@ function closingAttachment(
   return next ? { action, next } : null
 }
 
-/** Strict beats non-strict; otherwise more of the goal met wins. */
+/**
+ * Strict beats non-strict; then more priority levels fully met (every
+ * essential part beats more parts overall); then more of the goal met.
+ */
 function better(candidate: GoalScore, incumbent: GoalScore): boolean {
   if (candidate.strict !== incumbent.strict) return candidate.strict
+  if (candidate.tier !== incumbent.tier) return candidate.tier > incumbent.tier
   return candidate.closeness > incumbent.closeness
 }
 
 const ties = (a: GoalScore, b: GoalScore): boolean =>
-  a.strict === b.strict && a.closeness === b.closeness
+  a.strict === b.strict && a.tier === b.tier && a.closeness === b.closeness
 
 /**
  * Find the best board this hand can reach by the end of turn 1.
@@ -287,7 +291,7 @@ export function searchBestLine(
     const after = scoreBoard(goal, toBoardView(closing.next), labelFor)
     // Only if it costs the board nothing — an Energy the goal wants kept in
     // hand stays there.
-    if (after.strict === best.strict && after.closeness >= best.closeness) {
+    if (after.strict === best.strict && after.tier >= best.tier && after.closeness >= best.closeness) {
       bestNode = { action: closing.action, before: bestState, after: closing.next, previous: bestNode }
       bestState = closing.next
       best = after
@@ -299,7 +303,13 @@ export function searchBestLine(
     if (!attached) return alt
     const score = scoreBoard(goal, toBoardView(attached.next), labelFor)
     // The same guard as the best line: never at the board's expense.
-    if (score.strict !== alt.score.strict || score.closeness < alt.score.closeness) return alt
+    if (
+      score.strict !== alt.score.strict ||
+      score.tier < alt.score.tier ||
+      score.closeness < alt.score.closeness
+    ) {
+      return alt
+    }
     return {
       state: attached.next,
       score,
@@ -332,6 +342,7 @@ export function outranks(
   b: Pick<Alternative, 'score' | 'setup'>,
 ): boolean {
   if (a.score.strict !== b.score.strict) return a.score.strict
+  if (a.score.tier !== b.score.tier) return a.score.tier > b.score.tier
   if (a.score.closeness !== b.score.closeness) return a.score.closeness > b.score.closeness
   return a.setup > b.setup
 }

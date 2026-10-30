@@ -11,6 +11,7 @@ import {
 } from '../../lib/sim/turns'
 import type { DeckCard } from '../../lib/types'
 import type { TurnsState } from '../../lib/use-playtest'
+import { PartialSuccessTurns } from './PartialSuccess'
 import { PrizeNote } from './PrizeNote'
 import { ReplayPlayer } from './ReplayPlayer'
 import { SimulationProgress } from './SimulationProgress'
@@ -142,6 +143,7 @@ export function TurnsResults({ goal, state, cards, onFewer }: Props) {
               progress. There is no opponent to interrupt it, so read this as the deck's own pace.
               The average counts only the games that get there by turn {MAX_TURNS}.
             </p>
+            <PartialSuccessTurns goal={goal} tiers={result.tiers} />
             <PrizeNote
               locked={result.prizeLocked}
               reached={result.reached}

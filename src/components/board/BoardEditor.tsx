@@ -18,12 +18,19 @@ import {
   removeTool,
   setBenchMin,
   removeSlotEnergy,
+  setPartPriority,
   setStadium,
   type DropZone,
 } from '../../lib/board/edit'
 import type { DropTarget, DroppedCard } from '../../lib/board/edit'
 import { slotTarget } from '../../lib/board/edit'
-import type { FieldGoal, SlotGoal } from '../../lib/board/goal'
+import {
+  PRIORITY_LEVELS,
+  scoreBoard,
+  type FieldGoal,
+  type Priority,
+  type SlotGoal,
+} from '../../lib/board/goal'
 import { findBasicEnergyByType } from '../../lib/card-db'
 import { cardImageUrl, recordImageUrl } from '../../lib/sample-hand'
 import type { DeckCard } from '../../lib/types'
@@ -290,6 +297,8 @@ export function BoardEditor({ cards, goal, onChange, horizon = 'turn1' }: Props)
             </div>
           </div>
         </div>
+
+        <Priorities goal={goal} labelFor={(key) => byKey.get(key)?.label ?? key} onChange={onChange} />
 
         <Palette cards={cards} picked={picked} onPick={setPicked} />
       </section>
@@ -565,5 +574,63 @@ function PaletteCard({
         </span>
       )}
     </button>
+  )
+}
+
+/**
+ * How much each part of the board matters. A game that has every part at a
+ * level, and every more important one, counts as a partial success at that
+ * level, so a board that is nearly right is not scored the same as a miss.
+ */
+function Priorities({
+  goal,
+  labelFor,
+  onChange,
+}: {
+  goal: FieldGoal
+  labelFor: (cardKey: string) => string
+  onChange: (goal: FieldGoal) => void
+}) {
+  const parts = scoreBoard(goal, { active: null, bench: [], stadiumKey: null, hand: [] }, labelFor).parts
+  // With a single part there is nothing to rank.
+  if (parts.length < 2) return null
+
+  return (
+    <details
+      data-testid="priorities"
+      className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm dark:border-slate-800 dark:bg-slate-900"
+    >
+      <summary className="cursor-pointer font-medium">
+        Priorities
+        <span className="ml-2 text-xs font-normal text-slate-500">
+          which parts a board can do without and still be a partial success
+        </span>
+      </summary>
+      <ul className="mt-3 space-y-1.5">
+        {parts.map((part) => (
+          <li key={part.id} className="flex flex-wrap items-center justify-between gap-2">
+            <span className="min-w-0 truncate">{part.label}</span>
+            <span className="flex shrink-0 gap-1" role="group" aria-label={`Priority of ${part.label}`}>
+              {PRIORITY_LEVELS.map(({ level, label }) => (
+                <button
+                  key={level}
+                  type="button"
+                  aria-pressed={part.priority === level}
+                  onClick={() => onChange(setPartPriority(goal, part.id, level as Priority))}
+                  className={[
+                    'rounded-md border px-2 py-0.5 text-xs',
+                    part.priority === level
+                      ? 'border-sky-500 bg-sky-50 font-medium text-sky-800 dark:bg-sky-950/40 dark:text-sky-200'
+                      : 'border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800',
+                  ].join(' ')}
+                >
+                  {label}
+                </button>
+              ))}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </details>
   )
 }

@@ -1,4 +1,4 @@
-import type { FieldGoal, SlotGoal } from './goal'
+import type { FieldGoal, Priority, SlotGoal } from './goal'
 
 /**
  * Edits to the ideal field.
@@ -157,4 +157,13 @@ export function dropCard(goal: FieldGoal, target: DropTarget, card: DroppedCard)
       // A target this function does not know about changes nothing.
       return goal
   }
+}
+
+/** Set how much one part of the board matters (1 essential, 3 nice to have). */
+export function setPartPriority(goal: FieldGoal, partId: string, priority: Priority): FieldGoal {
+  const priorities = { ...goal.priorities }
+  // Essential is the default, so it is not stored.
+  if (priority === 1) delete priorities[partId]
+  else priorities[partId] = priority
+  return { ...goal, priorities }
 }

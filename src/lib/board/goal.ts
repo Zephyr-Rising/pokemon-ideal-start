@@ -52,7 +52,23 @@ export interface FieldGoal {
   benchMin: number
   stadiumKey: string | null
   inHand: HandGoal[]
+  /**
+   * How much each part of the board matters, by part id: 1 is essential, 3 is
+   * nice to have. A part not listed is essential. A board missing only its
+   * less important parts still counts as a partial success.
+   */
+  priorities?: Record<string, Priority>
 }
+
+export type Priority = 1 | 2 | 3
+
+export const PRIORITY_LEVELS: { level: Priority; label: string }[] = [
+  { level: 1, label: 'Essential' },
+  { level: 2, label: 'Important' },
+  { level: 3, label: 'Nice to have' },
+]
+
+const LEAST_IMPORTANT: Priority = 3
 
 export const emptyGoal = (): FieldGoal => ({
   active: null,
@@ -79,14 +95,30 @@ export interface GoalPart {
   kind: PartKind
   label: string
   met: boolean
+  /** 1 essential, 2 important, 3 nice to have. */
+  priority: Priority
 }
 
 export interface GoalScore {
   parts: GoalPart[]
   /** Every part met. */
   strict: boolean
+  /**
+   * The highest priority level fully met: every part at that level or more
+   * important is in place. 0 when an essential part is missing; 3 when the
+   * whole board is.
+   */
+  tier: number
   /** Share of parts met, 1 when the goal is empty. */
   closeness: number
+}
+
+/** The priority levels a goal actually uses, most important first. */
+export function usedPriorities(goal: FieldGoal): Priority[] {
+  const levels = new Set<Priority>()
+  const empty: BoardView = { active: null, bench: [], stadiumKey: null, hand: [] }
+  for (const part of scoreBoard(goal, empty, (key) => key).parts) levels.add(part.priority)
+  return [...levels].sort((a, b) => a - b)
 }
 
 export const goalIsEmpty = (goal: FieldGoal): boolean =>
@@ -243,6 +275,7 @@ export function scoreBoard(
       kind: 'active',
       label: `${labelFor(goal.active.cardKey)} Active`,
       met: matches,
+      priority: 1,
     })
     if (goal.active.energy.length > 0) {
       parts.push({
@@ -251,6 +284,7 @@ export function scoreBoard(
         label: `${energyPhrase(goal.active, labelFor)} on the Active`,
         // Energy only counts on the Pokémon the goal actually asked for.
         met: matches && energyMet(board.active ?? undefined, goal.active),
+        priority: 1,
       })
     }
     for (const toolKey of goal.active.tools) {
@@ -260,6 +294,7 @@ export function scoreBoard(
         // "the Active", so it cannot read the same as a Tool on a benched copy.
         label: `${labelFor(toolKey)} on the Active`,
         met: matches && toolMet(board.active ?? undefined, toolKey),
+        priority: 1,
       })
     }
   }
@@ -274,6 +309,7 @@ export function scoreBoard(
       kind: 'bench',
       label: `${name} benched`,
       met: pokemon !== undefined,
+      priority: 1,
     })
     if (slot.energy.length > 0) {
       parts.push({
@@ -281,6 +317,7 @@ export function scoreBoard(
         kind: 'benchEnergy',
         label: `${energyPhrase(slot, labelFor)} on ${name}`,
         met: energyMet(pokemon, slot),
+        priority: 1,
       })
     }
     for (const toolKey of slot.tools) {
@@ -289,6 +326,7 @@ export function scoreBoard(
         kind: 'benchTool',
         label: `${labelFor(toolKey)} on ${name}`,
         met: toolMet(pokemon, toolKey),
+        priority: 1,
       })
     }
   }
@@ -299,6 +337,7 @@ export function scoreBoard(
       kind: 'benchMin',
       label: `${goal.benchMin} or more benched`,
       met: board.bench.length >= goal.benchMin,
+      priority: 1,
     })
   }
 
@@ -308,6 +347,7 @@ export function scoreBoard(
       kind: 'stadium',
       label: `${labelFor(goal.stadiumKey)} in play`,
       met: board.stadiumKey === goal.stadiumKey,
+      priority: 1,
     })
   }
 
@@ -321,13 +361,18 @@ export function scoreBoard(
           ? `${labelFor(want.cardKey)} still in hand`
           : `${want.count}× ${labelFor(want.cardKey)} still in hand`,
       met: held >= want.count,
+      priority: 1,
     })
   }
 
+  for (const part of parts) part.priority = goal.priorities?.[part.id] ?? 1
   const metCount = parts.filter((part) => part.met).length
+  const missing = parts.filter((part) => !part.met).map((part) => part.priority)
   return {
     parts,
-    strict: parts.every((part) => part.met),
+    strict: missing.length === 0,
+    // Everything more important than the most important part missing.
+    tier: missing.length === 0 ? LEAST_IMPORTANT : Math.min(...missing) - 1,
     // An empty goal is trivially met, which keeps the score defined rather
     // than 0/0 before the user has placed anything.
     closeness: parts.length === 0 ? 1 : metCount / parts.length,

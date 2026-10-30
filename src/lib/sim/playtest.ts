@@ -1,4 +1,4 @@
-import { goalIsEmpty, scoreBoard, type FieldGoal, type GoalScore } from '../board/goal'
+import { goalIsEmpty, scoreBoard, type FieldGoal, type GoalScore, type Priority } from '../board/goal'
 import type { DeckCard } from '../types'
 import { draw, type ActionContext } from './actions'
 import { buildContext } from './context'
@@ -45,6 +45,11 @@ export interface OrderResult {
   closeness: number
   parts: PartStat[]
   patterns: PatternStat[]
+  /**
+   * Partial success: for each priority level, the share of games with every
+   * part at that level or more important in place. Level 3 is the whole board.
+   */
+  tiers: { priority: Priority; rate: number }[]
 }
 
 /**
@@ -168,7 +173,14 @@ export function playtest(
   const deck = physicalDeck(cards)
   const ignored = ignoredCards(cards)
 
-  const noOrder: OrderResult = { strict: 0, margin: 0, closeness: 0, parts: [], patterns: [] }
+  const noOrder: OrderResult = {
+    strict: 0,
+    margin: 0,
+    closeness: 0,
+    parts: [],
+    patterns: [],
+    tiers: [],
+  }
   const blank: PlaytestResult = {
     ...noOrder,
     trials: 0,
@@ -183,13 +195,22 @@ export function playtest(
   if (deck.length < 13 || !deck.some(isBasicPokemon)) return blank
   // An empty goal is met by every board; running trials would say nothing.
   if (goalIsEmpty(goal)) {
-    const always: OrderResult = { ...noOrder, strict: 1, closeness: 1 }
+    const always: OrderResult = {
+      ...noOrder,
+      strict: 1,
+      closeness: 1,
+      tiers: ([1, 2, 3] as const).map((priority) => ({ priority, rate: 1 })),
+    }
     return { ...blank, ...always, trials, goingFirst: always, goingSecond: always }
   }
 
   const first = new OrderTally()
   const second = new OrderTally()
+  // The whole board, for reporting games it could never reach; and only its
+  // essential parts, since a game that could still reach those is worth
+  // playing for a partial success.
   const requirements = boardRequirements(goal, cards, labelFor)
+  const essentials = boardRequirements(goal, cards, labelFor, 1)
   const locked = new PrizeLockTally()
   let mulligans = 0
   let deals = 0
@@ -224,8 +245,8 @@ export function playtest(
     // A board the prizes have already made impossible is logged as such and
     // not played: no line can build it.
     const locks = prizeLocks(requirements, deck, deal.prizes)
-    if (locks.length > 0) {
-      locked.add(locks)
+    if (locks.length > 0) locked.add(locks)
+    if (locks.length > 0 && prizeLocks(essentials, deck, deal.prizes).length > 0) {
       first.addLocked()
       second.addLocked()
       if (options.onProgress && (trial + 1) % (options.progressEvery ?? 25) === 0) {
@@ -404,7 +425,9 @@ export function playDeal(
       finalState === null ||
       (result.score.strict !== best.strict
         ? result.score.strict
-        : result.score.closeness > best.closeness ||
+        : result.score.tier !== best.tier
+          ? result.score.tier > best.tier
+          : result.score.closeness > best.closeness ||
           // Playing on past this turn, the better-set-up opening wins a tie.
           (ctx.multiTurn === true &&
             result.score.closeness === best.closeness &&
@@ -466,6 +489,8 @@ class OrderTally {
   readonly outcomes: number[] = []
   /** Games the prizes made impossible; not played, so they have no parts. */
   locked = 0
+  /** Games with every part at or above each priority level met; [k] is level k. */
+  readonly tierHits = [0, 0, 0, 0]
 
   /** A game the prizes made impossible: a miss, with no parts to record. */
   addLocked(): void {
@@ -475,6 +500,7 @@ class OrderTally {
 
   add(score: GoalScore): void {
     if (score.strict) this.strictHits++
+    for (let level = 1; level <= 3; level++) if (score.tier >= level) this.tierHits[level]++
     this.closenessTotal += score.closeness
     this.outcomes.push(score.strict ? 1 : 0)
     for (const part of score.parts) {
@@ -504,6 +530,10 @@ class OrderTally {
         metRate: entry.hits / played,
       })),
       patterns: patternStats(this.patterns, played),
+      tiers: ([1, 2, 3] as const).map((priority) => ({
+        priority,
+        rate: this.tierHits[priority] / trials,
+      })),
     }
   }
 }
@@ -543,5 +573,6 @@ function averageOrders(first: OrderTally, second: OrderTally, trials: number): O
       metRate: (part.metRate + (secondRate.get(part.id) ?? 0)) / 2,
     })),
     patterns: patternStats(combined, Math.max(trials - first.locked, 1)),
+    tiers: a.tiers.map((tier, i) => ({ ...tier, rate: (tier.rate + b.tiers[i].rate) / 2 })),
   }
 }
