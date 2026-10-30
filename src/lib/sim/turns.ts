@@ -33,12 +33,13 @@ export const MAX_TURNS = 6
 const DEFAULT_TRIALS = 500
 
 /**
- * Per-turn search budget. Lower than turn 1's on purpose: measured on the
- * benchmark, quadrupling it moved the average by about a tenth of a turn while
- * nearly tripling the time. The extra lines go to turns that cannot finish the
- * board anyway.
+ * Per-turn search budget, measured on the benchmark (`npm run bench`). Most
+ * turns finish well inside it; it is the backstop for big hands. At 6,000 no
+ * Dragapult game runs out and it costs no time there, while the Festival Lead
+ * deck's largest hands take about twice as long as at 1,500 for the same
+ * figures — a fair price for searching them properly.
  */
-const TURN_MAX_NODES = 1_500
+const TURN_MAX_NODES = 6_000
 
 export interface TurnsOptions {
   trials?: number
@@ -98,6 +99,9 @@ export interface TurnsResult extends TurnsOrderDetail {
   ignored: string[]
   /** Games in which some turn's search hit its budget. */
   truncated: number
+  /** Turns played across every game and order, and how many hit the budget. */
+  turnsPlayed: number
+  turnsTruncated: number
   /**
    * Example games, fastest first: one for every turn some game built the board
    * on, from each turn order where both managed it.
@@ -126,11 +130,23 @@ function turnsToBuild(
 
   const first = playDeal(deal, goal, ctx, labelFor, maxNodes, goingFirst)
   let hitBudget = first.hitBudget
+  // Turn 1 runs one search per opening tried; counted as one turn here.
+  let searches = 1
+  let truncatedSearches = first.hitBudget ? 1 : 0
   record(first.score, 1)
   // Kept as the search left it; turned into readable frames only if this game
   // becomes an example, which most never do.
   const later: LaterTurn[] = []
-  if (first.score.strict) return { turn: 1, hitBudget, parts, first: first.frames, later }
+  const done = (turn: number | null): GameOutcome => ({
+    turn,
+    hitBudget,
+    searches,
+    truncatedSearches,
+    parts,
+    first: first.frames,
+    later,
+  })
+  if (first.score.strict) return done(1)
 
   let state: SimState | null = first.finalState
   for (let turn = 2; turn <= MAX_TURNS && state; turn++) {
@@ -138,13 +154,17 @@ function turnsToBuild(
     if (state.deck.length === 0) break
     const started = startNextTurn(state)
     const result = searchBestLine(started, goal, ctx, labelFor, { maxNodes })
-    if (!result.exhausted) hitBudget = true
+    searches++
+    if (!result.exhausted) {
+      hitBudget = true
+      truncatedSearches++
+    }
     record(result.score, turn)
     later.push({ turn, started, steps: result.steps, frames: result.frames })
-    if (result.score.strict) return { turn, hitBudget, parts, first: first.frames, later }
+    if (result.score.strict) return done(turn)
     state = result.finalState
   }
-  return { turn: null, hitBudget, parts, first: first.frames, later }
+  return done(null)
 }
 
 /** A turn after the first, as the search left it. */
@@ -190,6 +210,9 @@ interface GameOutcome {
   /** The turn the whole board came together, or null. */
   turn: number | null
   hitBudget: boolean
+  /** Turns played, and how many of their searches hit the budget. */
+  searches: number
+  truncatedSearches: number
   /** The turn each part first came together, or null. */
   parts: Map<string, { label: string; turn: number | null }>
   /** Turn 1's frames, deal first. */
@@ -267,6 +290,8 @@ export function turnsTest(
     mulliganRate: 0,
     ignored,
     truncated: 0,
+    turnsPlayed: 0,
+    turnsTruncated: 0,
     examples: [],
   }
   if (deck.length < 13 || !deck.some(isBasicPokemon) || goalIsEmpty(goal)) return blank
@@ -277,6 +302,8 @@ export function turnsTest(
   let mulligans = 0
   let deals = 0
   let truncated = 0
+  let turnsPlayed = 0
+  let turnsTruncated = 0
 
   for (let trial = 0; trial < trials; trial++) {
     const rng = mulberry32(seed + trial * 7919)
@@ -305,6 +332,8 @@ export function turnsTest(
       if (!examples.has(key)) examples.set(key, toTurnsExample(game, goingFirst))
     }
     if (asFirst.hitBudget || asSecond.hitBudget) truncated++
+    turnsPlayed += asFirst.searches + asSecond.searches
+    turnsTruncated += asFirst.truncatedSearches + asSecond.truncatedSearches
 
     if (options.onProgress && (trial + 1) % (options.progressEvery ?? 5) === 0) {
       options.onProgress(trial + 1, trials)
@@ -331,6 +360,8 @@ export function turnsTest(
     mulliganRate: deals === 0 ? 0 : mulligans / deals,
     ignored,
     truncated,
+    turnsPlayed,
+    turnsTruncated,
     // Fastest first; going first before going second within a turn.
     examples: [...examples.values()].sort(
       (a, b) => a.turn - b.turn || Number(b.goingFirst) - Number(a.goingFirst),

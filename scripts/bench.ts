@@ -84,6 +84,17 @@ const CASES: Case[] = [
         bench: [slot(keyOf(c, 'Munkidori'))],
       }),
   },
+  {
+    name: 'festival turns: Dipplin Active, Thwackey + Lilligant benched',
+    deck: 'festival-lead',
+    mode: 'turns',
+    trials: 60,
+    build: (c) =>
+      goal({
+        active: slot(keyOf(c, 'Dipplin')),
+        bench: [slot(keyOf(c, 'Thwackey')), slot(keyOf(c, 'Lilligant'))],
+      }),
+  },
 ]
 
 const filter = process.argv[2]?.toLowerCase()
@@ -100,7 +111,7 @@ for (const c of CASES) {
     summary = `strict ${(r.strict * 100).toFixed(1)}% (1st ${(r.goingFirst.strict * 100).toFixed(1)} / 2nd ${(r.goingSecond.strict * 100).toFixed(1)}) truncated ${r.truncated}/${r.trials}`
   } else {
     const r = turnsTest(cards, g, label, { trials: c.trials, seed: 11 })
-    summary = `median ${r.median} mean ${r.mean?.toFixed(2)} reached ${(r.reached * 100).toFixed(1)}% truncated ${r.truncated}/${r.trials}`
+    summary = `median ${r.median} mean ${r.mean?.toFixed(2)} reached ${(r.reached * 100).toFixed(1)}% truncated ${r.truncated}/${r.trials} games, ${r.turnsTruncated}/${r.turnsPlayed} turns`
   }
   const ms = performance.now() - start
   total += ms

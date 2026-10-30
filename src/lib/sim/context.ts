@@ -89,16 +89,20 @@ export function buildContext(
     needs.includes(null) ? [] : needs.filter((type): type is string => type !== null),
   )
 
-  // Which Pokémon the goal wants Energy on — and their earlier stages, since
-  // Energy stays attached through evolution: Psychic for a Dragapult ex can go
-  // on the Dreepy that becomes it. Attaching anywhere else cannot bring the
-  // board closer, so those plays are never generated.
+  // Which Pokémon the goal wants Energy on. Attaching anywhere else cannot
+  // bring the board closer this turn, so those plays are never generated.
   const energyTargets = new Set(energySlots.map((slot) => slot.cardKey))
-  for (const key of [...energyTargets]) {
+  // ...and their earlier stages, since Energy stays attached through
+  // evolution: Psychic for a Dragapult ex belongs on the Dreepy that becomes
+  // it. Kept apart from the search's targets on purpose — within a turn,
+  // attaching after evolving lands on the same Pokémon, so trying the earlier
+  // stage too only doubles the search. The end-of-turn attachment uses these.
+  const energyLineage = new Set(energyTargets)
+  for (const key of energyTargets) {
     const card = cards.find((c) => c.key === key)
     let prev = card?.card?.prev ? norm(card.card.prev) : null
     for (let depth = 0; prev && depth < 2; depth++) {
-      for (const earlier of byName.get(prev) ?? []) energyTargets.add(earlier.key)
+      for (const earlier of byName.get(prev) ?? []) energyLineage.add(earlier.key)
       prev = prevOf.get(prev) ?? null
     }
   }
@@ -110,6 +114,7 @@ export function buildContext(
     // Empty means "any type will do".
     energyTypes,
     energyTargets,
+    energyLineage,
     activeKey: goal.active?.cardKey ?? null,
     prevOf,
     activeLineage,

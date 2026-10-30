@@ -171,9 +171,11 @@ export function TurnsResults({ goal, state, cards, onFewer }: Props) {
               )}
               {result.truncated > 0 && (
                 <p className="rounded-md bg-amber-50 px-3 py-2 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-                  In {pct(result.truncated / result.trials)} of games some turn's search hit its
-                  budget before exploring every line. That can only make a game slower, never
-                  faster, so the real pace is at least this good.
+                  {pct(result.turnsTruncated / Math.max(result.turnsPlayed, 1))} of turns played (
+                  {result.turnsTruncated.toLocaleString()} of {result.turnsPlayed.toLocaleString()},
+                  in {pct(result.truncated / result.trials)} of games) hit the search budget before
+                  exploring every line. That can only make a game slower, never faster, so the
+                  real pace is at least this good.
                 </p>
               )}
             </div>

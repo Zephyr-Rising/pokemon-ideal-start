@@ -5,6 +5,7 @@ import {
   BASE_BENCH,
   benchCap,
   cloneState,
+  fairShuffle,
   inPlay,
   retreatCost,
   signature,
@@ -419,5 +420,24 @@ describe('evolution from turn 2', () => {
     drakloak.card!.name = 'Drakloak'
     const s = state({ active: settled, hand: [drakloak], turn: 2 })
     expect(evolves(s, relevantTo())).toBe(1)
+  })
+})
+
+describe('fair shuffles', () => {
+  const pile = ['a', 'b', 'c', 'd', 'e', 'f'].map((k) => basic(k))
+  const keysOf = (cards: { key: string }[]) => cards.map((c) => c.key)
+
+  it('depend only on which cards are shuffled, not their order or objects', () => {
+    const s = state({})
+    const once = keysOf(fairShuffle(s, pile, 7))
+    expect(keysOf(fairShuffle(s, [...pile].reverse(), 7))).toEqual(once)
+    // Fresh objects for the same cards give the same order too.
+    expect(keysOf(fairShuffle(s, pile.map((c) => basic(c.key)), 7))).toEqual(once)
+  })
+
+  it('differ from one shuffle of the game to the next', () => {
+    const first = keysOf(fairShuffle(state({}), pile, 7))
+    const second = keysOf(fairShuffle(state({ shuffles: 1 }), pile, 7))
+    expect(second).not.toEqual(first)
   })
 })

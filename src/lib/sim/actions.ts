@@ -169,8 +169,14 @@ export function legalActions(state: SimState, ctx: ActionContext): Action[] {
       if (!isEnergy(card) || seenEnergy.has(card.key)) return
       seenEnergy.add(card.key)
       const rightType = ctx.energyTypes.size === 0 || ctx.energyTypes.has(energyType(card))
+      // Two benched Pokémon that are the same card carrying the same Energy
+      // give the same board either way, so only one is tried.
+      const seenSlot = new Set<string>()
       for (const target of targets(state)) {
         const slot = slotAt(state, target)!
+        const same = `${target === ACTIVE_TARGET ? 'A' : 'B'}${slot.card.key}+${slot.energy.length}`
+        if (seenSlot.has(same)) continue
+        seenSlot.add(same)
         // Onto the Pokémon the goal wants Energy on, when it named any.
         const forGoal =
           ctx.wantsEnergy &&

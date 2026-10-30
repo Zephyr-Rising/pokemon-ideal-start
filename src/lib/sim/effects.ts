@@ -45,6 +45,8 @@ export interface EffectContext {
   energyTypes: Set<string>
   /** Card keys the goal wants Energy on; empty means nowhere in particular. */
   energyTargets: Set<string>
+  /** The same, plus each target's earlier stages; for the end-of-turn attachment. */
+  energyLineage?: Set<string>
   /** The card the goal wants Active, if any. */
   activeKey: string | null
   /**

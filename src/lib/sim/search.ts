@@ -117,7 +117,7 @@ function closingAttachment(
 
   const worth = (slot: InPlay): number => {
     const key = slot.card.key
-    if (ctx.wantsEnergy && ctx.energyTargets.has(key)) return 4
+    if (ctx.wantsEnergy && (ctx.energyLineage ?? ctx.energyTargets).has(key)) return 4
     if (ctx.activeLineage?.has(key)) return 3
     if (ctx.relevant.has(key)) return 2
     return slot === state.active ? 1 : 0

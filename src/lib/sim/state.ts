@@ -246,7 +246,10 @@ export function signature(state: SimState): string {
  * Callers record the shuffle with `next.shuffles = shufflesAfter(state)`.
  */
 export function fairShuffle(state: SimState, pile: DeckCard[], seed: number): DeckCard[] {
-  const sorted = [...pile].sort((a, b) => idOf(a) - idOf(b))
+  // Sorted by the card's own key, which never changes. Not by `idOf`: those
+  // numbers are handed out in the order cards are first seen, so the result
+  // would depend on what else had run in the same session.
+  const sorted = [...pile].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
   const rng = mulberry32(seed ^ hashString(`${state.turn ?? 1}:${state.shuffles ?? 0}`))
   return shuffled(sorted, rng)
 }
