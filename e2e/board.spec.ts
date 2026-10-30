@@ -387,3 +387,23 @@ test('asks for a number of cards in hand', async ({ page }) => {
   )
   await expect(page.getByTestId('partial-success')).toBeVisible({ timeout: 60_000 })
 })
+
+test('a board change mid-run starts the new run straight away', async ({ page }) => {
+  test.setTimeout(120_000)
+  await stubCardArt(page)
+  await page.goto('./')
+  await page.getByRole('textbox').first().fill(readFileSync('tests/fixtures/dragapult-munkidori.txt', 'utf8'))
+  await page.getByRole('tab', { name: 'Turns to build' }).click()
+  await page.getByRole('button', { name: 'Pick Dragapult ex' }).click()
+  await page.getByRole('button', { name: 'Place in Active spot' }).click()
+  const progress = page.getByTestId('simulation-progress')
+  await expect(progress.getByText(/games\/s/)).toBeVisible({ timeout: 30_000 })
+
+  // Change the board while that run is still going.
+  await page.getByRole('button', { name: 'Pick Munkidori' }).click()
+  await page.getByRole('button', { name: 'Place in Bench' }).click()
+  // The new run starts from zero, then shows games completing within seconds,
+  // rather than sitting at zero until the old run finishes in the background.
+  await expect(progress.getByText(/200 games… 0 done/)).toBeVisible({ timeout: 5_000 })
+  await expect(progress.getByText(/200 games… [1-9]\d* done/)).toBeVisible({ timeout: 10_000 })
+})

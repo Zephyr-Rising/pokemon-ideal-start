@@ -467,7 +467,7 @@ export function turnsTest(
       second.locked++
       // Never built, in either turn order.
       luckRecords.push(luck.record(deal.hand, deal.prizes, null), luck.record(deal.hand, deal.prizes, null))
-      if (options.onProgress && (trial + 1) % (options.progressEvery ?? 5) === 0) {
+      if (options.onProgress && (trial + 1) % (options.progressEvery ?? 1) === 0) {
         options.onProgress(trial + 1, trials)
       }
       continue
@@ -496,7 +496,7 @@ export function turnsTest(
     turnsPlayed += asFirst.searches + asSecond.searches
     turnsTruncated += asFirst.truncatedSearches + asSecond.truncatedSearches
 
-    if (options.onProgress && (trial + 1) % (options.progressEvery ?? 5) === 0) {
+    if (options.onProgress && (trial + 1) % (options.progressEvery ?? 1) === 0) {
       options.onProgress(trial + 1, trials)
     }
   }

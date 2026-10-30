@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { goalIsEmpty, type FieldGoal } from './board/goal'
 import type { DeckCard } from './types'
@@ -55,11 +55,23 @@ export function useSimulation<M extends SimulationMode>(
   )
   const [state, setState] = useState<SimulationState<ResultOf[M]>>({ result: null, ...idle })
 
-  useEffect(() => {
+  // Whether the worker is partway through a run.
+  const busy = useRef(false)
+
+  /**
+   * A fresh worker. A run cannot be interrupted from outside — the worker is
+   * busy until it finishes — so a run that is no longer wanted is stopped by
+   * replacing the worker. Queuing behind it instead left the new run's clock
+   * ticking while nothing visibly happened, then every game seemingly finished
+   * at once.
+   */
+  const spawn = useCallback(() => {
+    workerRef.current?.terminate()
     const worker = new Worker(new URL('../worker/playtest.worker.ts', import.meta.url), {
       type: 'module',
     })
     workerRef.current = worker
+    busy.current = false
 
     worker.onmessage = (event: MessageEvent<PlaytestResponse>) => {
       const message = event.data
@@ -69,19 +81,25 @@ export function useSimulation<M extends SimulationMode>(
       if (message.kind === 'progress') {
         setState((current) => ({ ...current, progress: message.done, total: message.total }))
       } else if (message.kind === 'done') {
+        busy.current = false
         setState({ result: message.result as ResultOf[M], ...idle })
       } else {
+        busy.current = false
         setState({ result: null, ...idle, error: message.message })
       }
     }
+    return worker
+  }, [])
 
+  useEffect(() => {
+    spawn()
     return () => {
-      worker.terminate()
+      workerRef.current?.terminate()
       workerRef.current = null
       // The worker is gone, so whatever it was running will never report back.
       lastRun.current = null
     }
-  }, [])
+  }, [spawn])
 
   useEffect(() => {
     if (!enabled) return
@@ -102,8 +120,10 @@ export function useSimulation<M extends SimulationMode>(
     }
 
     const timer = setTimeout(() => {
-      const worker = workerRef.current
+      // Stop a run still going rather than queue behind it.
+      const worker = busy.current ? spawn() : workerRef.current
       if (!worker) return
+      busy.current = true
       const id = ++requestId.current
       lastRun.current = { cards, goal, trials, seed }
       setState((current) => ({
@@ -119,7 +139,7 @@ export function useSimulation<M extends SimulationMode>(
     }, DEBOUNCE_MS)
 
     return () => clearTimeout(timer)
-  }, [mode, cards, goal, trials, seed, enabled])
+  }, [mode, cards, goal, trials, seed, enabled, spawn])
 
   return state
 }

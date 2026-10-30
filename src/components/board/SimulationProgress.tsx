@@ -2,6 +2,10 @@ import { useEffect, useState } from 'react'
 
 /** Past this, a run is slow enough to explain and to offer a quicker one. */
 const SLOW_MS = 10_000
+/** The window the recent pace is measured over. */
+const RECENT_MS = 10_000
+/** Games to wait for before estimating what is left. */
+const MIN_GAMES = 5
 
 interface Props {
   /** Games played so far, and how many the run will play. */
@@ -34,9 +38,36 @@ export function SimulationProgress({ progress, total, startedAt, updating, onFew
     return () => window.clearInterval(id)
   }, [])
 
+  // When each game finished, for the recent pace. Games vary a lot — a deal
+  // that builds the board on turn 2 is over in a moment, one that never does
+  // plays all six turns — so the pace since the start can mislead in both
+  // directions; the last several seconds are a better guide to what is left.
+  // React's "adjust state when an input changes" pattern: each new report adds
+  // a point, timed by the clock this component already ticks; a new run
+  // starts the history afresh.
+  const [samples, setSamples] = useState<{ at: number; done: number }[]>([])
+  const [seen, setSeen] = useState<{ progress: number; startedAt: number | null } | null>(null)
+  if (seen === null || seen.progress !== progress || seen.startedAt !== startedAt) {
+    setSeen({ progress, startedAt })
+    const fresh = seen === null || seen.startedAt !== startedAt ? [] : samples
+    setSamples([...fresh, { at: now, done: progress }].slice(-200))
+  }
+
   const elapsed = startedAt === null ? 0 : now - startedAt
   const share = total > 0 ? Math.min(1, progress / total) : 0
-  const remaining = progress > 0 && share < 1 ? (elapsed / progress) * (total - progress) : null
+  const recent = samples.filter((sample) => now - sample.at <= RECENT_MS)
+  const from = recent[0] ?? samples[0]
+  const to = samples[samples.length - 1]
+  // Games per second over the recent window, else since the start.
+  const pace =
+    from && to && to.at > from.at && to.done > from.done
+      ? ((to.done - from.done) / (to.at - from.at)) * 1000
+      : elapsed > 0 && progress > 0
+        ? (progress / elapsed) * 1000
+        : 0
+  // Too few games in for an estimate worth showing.
+  const settled = progress >= Math.min(MIN_GAMES, Math.ceil(total * 0.05)) && pace > 0
+  const remaining = settled && share < 1 ? ((total - progress) / pace) * 1000 : null
   const slow = elapsed > SLOW_MS
 
   return (
@@ -51,7 +82,10 @@ export function SimulationProgress({ progress, total, startedAt, updating, onFew
         </span>
         <span className="tnum text-xs">
           {seconds(elapsed)} so far
-          {remaining !== null && ` · about ${seconds(remaining)} left`}
+          {pace > 0 && ` · ${pace >= 10 ? Math.round(pace) : pace.toFixed(1)} games/s`}
+          {remaining !== null
+            ? ` · about ${seconds(remaining)} left`
+            : progress < total && ' · estimating…'}
         </span>
       </div>
       <div
@@ -70,7 +104,9 @@ export function SimulationProgress({ progress, total, startedAt, updating, onFew
       {slow && (
         <p className="text-xs">
           This board is taking a while: each game searches every line of play, and a board that
-          needs many cards to line up has a lot of them. It is still going.
+          needs many cards to line up has a lot of them. Games also vary — one that builds the
+          board early is quick, one that never does plays every turn — so the pace jumps around
+          and the estimate follows the last few seconds. It is still going.
           {onFewer && (
             <>
               {' '}

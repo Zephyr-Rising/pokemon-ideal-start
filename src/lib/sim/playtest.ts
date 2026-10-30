@@ -249,7 +249,7 @@ export function playtest(
     if (locks.length > 0 && prizeLocks(essentials, deck, deal.prizes).length > 0) {
       first.addLocked()
       second.addLocked()
-      if (options.onProgress && (trial + 1) % (options.progressEvery ?? 25) === 0) {
+      if (options.onProgress && (trial + 1) % (options.progressEvery ?? 5) === 0) {
         options.onProgress(trial + 1, trials)
       }
       continue
@@ -279,7 +279,7 @@ export function playtest(
       closest = toExample(asSecond, false)
     }
 
-    if (options.onProgress && (trial + 1) % (options.progressEvery ?? 25) === 0) {
+    if (options.onProgress && (trial + 1) % (options.progressEvery ?? 5) === 0) {
       options.onProgress(trial + 1, trials)
     }
   }
