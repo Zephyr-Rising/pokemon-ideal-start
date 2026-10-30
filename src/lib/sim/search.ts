@@ -2,8 +2,16 @@ import { scoreBoard, type FieldGoal, type GoalScore } from '../board/goal'
 import { applyAction, legalActions, type Action, type ActionContext } from './actions'
 import { describeStep } from './describe'
 import { orderActions } from './priorities'
-import { abilityOf } from './abilities'
-import { allInPlay, signature, toBoardView, type SimState } from './state'
+import { abilityOf, engineKeeps } from './abilities'
+import {
+  ACTIVE_TARGET,
+  allInPlay,
+  energyType,
+  signature,
+  toBoardView,
+  type InPlay,
+  type SimState,
+} from './state'
 
 export interface SearchResult {
   /** The best board this hand could reach. */
@@ -77,6 +85,52 @@ interface Step {
   after: SimState
   /** The play before it, or null for the first. */
   previous: Step | null
+}
+
+/**
+ * The turn's manual Energy attachment, when the line left it unused.
+ *
+ * Inside the search an attachment that completes no part this turn ties with
+ * not attaching, and the shorter line wins — so on its own the search would
+ * end turns holding Energy a player would have put down. The attachment is
+ * therefore made here, after the search, as the turn's last play: it costs no
+ * search time, and in a longer game the Energy is there for later turns.
+ *
+ * It goes where it will count most: on a Pokémon the goal wants Energy on (or
+ * an earlier stage of one), else on the goal Active's line, else on any
+ * Pokémon the goal names, else on the Active. Energy a draw engine is about to
+ * spend (Lunar Cycle, Teal Dance) is never used for it.
+ */
+function closingAttachment(
+  state: SimState,
+  ctx: ActionContext,
+): { action: Action; next: SimState } | null {
+  if (state.usedEnergy || !state.active) return null
+  const keep = engineKeeps(state)
+  const choices = state.hand
+    .map((card, handIndex) => ({ card, handIndex }))
+    .filter(({ card, handIndex }) => card.tags.includes('basic-energy') && !keep.has(handIndex))
+  if (choices.length === 0) return null
+  // A type the goal asks for, when it asks for one.
+  const energy =
+    choices.find(({ card }) => ctx.energyTypes.has(energyType(card))) ?? choices[0]
+
+  const worth = (slot: InPlay): number => {
+    const key = slot.card.key
+    if (ctx.wantsEnergy && ctx.energyTargets.has(key)) return 4
+    if (ctx.activeLineage?.has(key)) return 3
+    if (ctx.relevant.has(key)) return 2
+    return slot === state.active ? 1 : 0
+  }
+  const slots = [
+    { slot: state.active, target: ACTIVE_TARGET },
+    ...state.bench.map((slot, target) => ({ slot, target })),
+  ]
+  // Ties go to the earliest, which puts the Active first.
+  const best = slots.reduce((a, b) => (worth(b.slot) > worth(a.slot) ? b : a))
+  const action: Action = { kind: 'attachEnergy', handIndex: energy.handIndex, target: best.target }
+  const [next] = applyAction(state, action, ctx)
+  return next ? { action, next } : null
 }
 
 /** Strict beats non-strict; otherwise more of the goal met wins. */
@@ -178,6 +232,19 @@ export function searchBestLine(
   }
 
   visit(start, null, 0)
+
+  // A player never ends a turn holding an Energy they could have attached.
+  const closing = closingAttachment(bestState, ctx)
+  if (closing) {
+    const after = scoreBoard(goal, toBoardView(closing.next), labelFor)
+    // Only if it costs the board nothing — an Energy the goal wants kept in
+    // hand stays there.
+    if (after.strict === best.strict && after.closeness >= best.closeness) {
+      bestNode = { action: closing.action, before: bestState, after: closing.next, previous: bestNode }
+      bestState = closing.next
+      best = after
+    }
+  }
 
   const chain: Step[] = []
   for (let step: Step | null = bestNode; step; step = step.previous) chain.unshift(step)

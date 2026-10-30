@@ -242,3 +242,38 @@ describe('moving Energy around', () => {
     expect(result.line.map((a) => a.kind)).toEqual(['bench', 'attachEnergy', 'retreat'])
   })
 })
+
+describe('the turn\'s Energy attachment', () => {
+  const grass = (key: string) => card(key, ['energy', 'basic-energy'], { type: '{G}', name: 'Grass Energy' })
+
+  it('is used even when the board asks for no Energy', () => {
+    const s = state({ active: inPlay(basic('dreepy')), hand: [grass('g')] })
+    const result = run(s, goal({ active: slot('a', 'dreepy') }))
+    expect(result.score.strict).toBe(true)
+    expect(result.line.map((a) => a.kind)).toEqual(['attachEnergy'])
+    expect(result.finalState.active?.energy).toHaveLength(1)
+    expect(result.steps).toEqual(['Attach g to dreepy'])
+  })
+
+  it('goes on the earlier stage of a Pokémon the board wants Energy on', () => {
+    // Energy stays through evolution, so the Dreepy that becomes Dragapult ex
+    // is where it belongs, even with another Pokémon Active.
+    const dreepy = card('dreepy', ['pokemon', 'basic'], { name: 'Dreepy', retreat: 0 })
+    const drakloak = card('drakloak', ['pokemon', 'stage1'], { name: 'Drakloak', prev: 'Dreepy' })
+    const dragapult = card('dragapult', ['pokemon', 'stage2'], { name: 'Dragapult ex', prev: 'Drakloak' })
+    const g = goal({ active: slot('a', 'dragapult'), bench: [] })
+    g.active!.energy = ['{G}']
+    const ctx: ActionContext = buildContext(g, () => 0.5, 1, [dreepy, drakloak, dragapult])
+    const s = state({ active: inPlay(basic('budew')), bench: [inPlay(dreepy)], hand: [grass('g')] })
+    const result = searchBestLine(s, g, ctx, label)
+    expect(result.finalState.bench[0].energy).toHaveLength(1)
+    expect(result.finalState.active?.energy).toHaveLength(0)
+  })
+
+  it('leaves an Energy the board wants kept in hand', () => {
+    const s = state({ active: inPlay(basic('dreepy')), hand: [grass('g')] })
+    const result = run(s, goal({ inHand: [{ id: 'h', cardKey: 'g', count: 1 }] }))
+    expect(result.score.strict).toBe(true)
+    expect(result.line).toEqual([])
+  })
+})
