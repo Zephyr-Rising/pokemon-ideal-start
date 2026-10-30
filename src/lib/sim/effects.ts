@@ -33,9 +33,8 @@ import {
  * Stamp needs one of your Pokémon to have been Knocked Out, Special Red Card
  * needs the opponent down to three Prizes, Rosa's Encouragement needs more
  * Prizes remaining than they have, and Boss's Orders only moves their Pokémon.
- * Ciphermaniac's Codebreaking stacks the top of the deck, which changes next
- * turn's draw, not this board. Rare Candy is here for turn 2 onward, and does
- * nothing on a player's first turn, as the card itself says.
+ * Rare Candy is here for turn 2 onward, and does nothing on a player's first
+ * turn, as the card itself says.
  */
 export interface EffectContext {
   /** Card keys the goal mentions — effect choices are narrowed to these. */
@@ -433,6 +432,52 @@ registerEffect("Team Rocket's Petrel", (state, ctx) => {
     return next
   })
 })
+
+// "Search your deck for 2 cards, shuffle your deck, then put those cards on top
+// of it in any order."
+//
+// On its own it changes no board, but anything that draws afterwards takes
+// those two: Lunar Cycle, Run Errand, Run Away Draw, Psychic Draw as a
+// Pokémon evolves, Recon Directive's look at the top two, Enriching Energy —
+// and, across turns, next turn's draw. So it is a two-card search waiting for
+// a draw, and the search plays it when one follows (and, as a play that
+// changes nothing otherwise, leaves it out when none does).
+registerEffect("Ciphermaniac's Codebreaking", (state, ctx) => {
+  // Candidates, best first: what the goal names, then engine pieces, then the
+  // outs that turn a hand around. A handful are tried in pairs.
+  const finishesEngine = engineWants(state)
+  const rank = (card: DeckCard) =>
+    ctx.relevant.has(card.key) ? 3 : finishesEngine(card) ? 2 : isOut(card, state, ctx) ? 1 : 0
+  const candidates = distinctCards(state.deck)
+    .map((card, order) => ({ card, order, rank: rank(card) }))
+    .filter((entry) => entry.rank > 0 && nameOf(entry.card) !== norm("Ciphermaniac's Codebreaking"))
+    .sort((a, b) => b.rank - a.rank || a.order - b.order)
+    .slice(0, CODEBREAKING_CANDIDATES)
+    .map((entry) => entry.card)
+  if (candidates.length === 0) return []
+
+  const stack = (top: DeckCard[]): SimState => {
+    const next = cloneState(state)
+    for (const card of top) removeFirst(next.deck, card)
+    next.deck = [...top, ...fairShuffle(state, next.deck, ctx.seed)]
+    next.shuffles = shufflesAfter(state)
+    return next
+  }
+  const out: SimState[] = []
+  candidates.forEach((first, i) => {
+    // The better card goes on top, so a draw of one takes it.
+    for (const second of candidates.slice(i)) {
+      const copies = state.deck.filter((card) => card.key === second.key).length
+      if (second.key === first.key && copies < 2) continue
+      out.push(stack([first, second]))
+    }
+  })
+  // A deck of one card worth having still gets it on top.
+  return out.length > 0 ? out : [stack([candidates[0]])]
+})
+
+/** How many of the best candidates Ciphermaniac's Codebreaking tries in pairs. */
+const CODEBREAKING_CANDIDATES = 4
 
 registerEffect('Poké Pad', (state, ctx) => {
   const found = choices(state, state.deck, (c) => isPokemon(c) && !hasRuleBox(c), ctx)

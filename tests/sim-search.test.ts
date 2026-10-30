@@ -402,3 +402,33 @@ describe('Enriching Energy', () => {
     expect(after.deck.map((c) => c.key)).toContain('dudunsparce')
   })
 })
+
+describe("Ciphermaniac's Codebreaking", () => {
+  const cipher = card('cipher', ['supporter'], { name: "Ciphermaniac's Codebreaking" })
+  const kangaskhan = card('kanga', ['pokemon', 'basic', 'ex'], { name: 'Mega Kangaskhan ex', rule: 'Mega Pokémon ex' })
+  // The two Pokémon the goal wants are deep in the deck.
+  const deck = () => [...Array.from({ length: 8 }, (_, i) => card(`junk${i}`, ['item'], { name: `junk${i}` })), basic('x'), basic('y')]
+
+  it('puts the two cards it finds on top of the deck', async () => {
+    const { lookupEffect } = await import('../src/lib/sim/effects')
+    const s = state({ deck: deck() })
+    const results = lookupEffect(cipher)!(s, buildContext(goal({ bench: [slot('a', 'x'), slot('b', 'y')] }), () => 0.5))
+    expect(results.some((r) => r.deck[0].key === 'x' && r.deck[1].key === 'y')).toBe(true)
+    expect(results.every((r) => r.deck.length === 10)).toBe(true)
+  })
+
+  it('becomes a two-card search with a draw after it', () => {
+    // Run Errand draws 2 from the Active Spot: Codebreaking stacks exactly them.
+    const s = state({ active: inPlay(kangaskhan), hand: [cipher], deck: deck() })
+    const result = run(s, goal({ bench: [slot('a', 'x'), slot('b', 'y')] }))
+    expect(result.score.strict).toBe(true)
+    const kinds = result.line.map((a) => a.kind)
+    expect(kinds.slice(0, 2)).toEqual(['playSupporter', 'useAbility'])
+  })
+
+  it('is left out when nothing draws after it', () => {
+    const s = state({ active: inPlay(basic('plain')), hand: [cipher], deck: deck() })
+    const result = run(s, goal({ bench: [slot('a', 'x')] }))
+    expect(result.line.map((a) => a.kind)).not.toContain('playSupporter')
+  })
+})

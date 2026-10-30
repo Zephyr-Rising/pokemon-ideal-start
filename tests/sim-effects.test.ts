@@ -442,7 +442,7 @@ describe('switching and recovery', () => {
 })
 
 describe('cards that cannot matter on turn 1', () => {
-  it.each(['Unfair Stamp', 'Special Red Card', "Boss's Orders", "Ciphermaniac's Codebreaking"])(
+  it.each(['Unfair Stamp', 'Special Red Card', "Boss's Orders"])(
     '%s is deliberately not implemented',
     (name) => {
       // Each is impossible or pointless on turn 1 — being inert is correct, not
