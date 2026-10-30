@@ -1,12 +1,23 @@
+import { useState } from 'react'
+
 import { goalIsEmpty, type FieldGoal } from '../../lib/board/goal'
 import { pct, plural } from '../../lib/format'
-import { MAX_TURNS, type TurnsOrderResult, type TurnsResult } from '../../lib/sim/turns'
+import {
+  MAX_TURNS,
+  type TurnsExample,
+  type TurnsOrderResult,
+  type TurnsResult,
+} from '../../lib/sim/turns'
+import type { DeckCard } from '../../lib/types'
 import type { TurnsState } from '../../lib/use-playtest'
+import { ReplayPlayer } from './ReplayPlayer'
 import { SimulationProgress } from './SimulationProgress'
 
 interface Props {
   goal: FieldGoal
   state: TurnsState
+  /** The resolved deck, for the card images the replay shows. */
+  cards: DeckCard[]
   /** Switch to the smallest game count, offered when a run is slow. */
   onFewer?: () => void
 }
@@ -18,7 +29,7 @@ const medianText = (order: TurnsOrderResult): string =>
 const meanText = (order: TurnsOrderResult): string =>
   order.mean === null ? '—' : order.mean.toFixed(1)
 
-export function TurnsResults({ goal, state, onFewer }: Props) {
+export function TurnsResults({ goal, state, cards, onFewer }: Props) {
   if (goalIsEmpty(goal)) {
     return (
       <section className="space-y-3">
@@ -140,6 +151,15 @@ export function TurnsResults({ goal, state, onFewer }: Props) {
             </p>
             <Distribution result={result} />
           </div>
+
+          {result.examples.length > 0 && (
+            <TurnExamples
+              // Remount on a fresh run so the shown game resets to the fastest.
+              key={`${result.trials}-${result.examples.map((e) => `${e.turn}${e.goingFirst}`).join('')}`}
+              examples={result.examples}
+              cards={cards}
+            />
+          )}
 
           {(result.ignored.length > 0 || result.truncated > 0) && (
             <div className="space-y-2 text-xs">
@@ -287,6 +307,76 @@ function PartTurns({ result }: { result: TurnsResult }) {
           )
         })}
       </ul>
+    </div>
+  )
+}
+
+/**
+ * Real games played out turn by turn, fastest first, with one for every turn
+ * any game built the board on, so the slow routes can be seen as well as the
+ * quick ones.
+ */
+function TurnExamples({ examples, cards }: { examples: TurnsExample[]; cards: DeckCard[] }) {
+  const [index, setIndex] = useState(0)
+  const example = examples[Math.min(index, examples.length - 1)]
+
+  return (
+    <div
+      data-testid="turns-examples"
+      className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"
+    >
+      <h3 className="text-sm font-semibold">How games get there</h3>
+      <p className="mt-0.5 mb-3 text-xs text-slate-500">
+        Real games from this run, fastest first: one for every turn a game built the board on, from
+        each turn order.
+      </p>
+
+      <div className="mb-3 flex flex-wrap gap-1.5" role="group" aria-label="Example games">
+        {examples.map((option, i) => (
+          <button
+            key={`${option.turn}-${option.goingFirst}`}
+            type="button"
+            onClick={() => setIndex(i)}
+            aria-pressed={i === index}
+            className={[
+              'rounded-md border px-2.5 py-1 text-xs',
+              i === index
+                ? 'border-sky-500 bg-sky-50 font-medium text-sky-800 dark:bg-sky-950/40 dark:text-sky-200'
+                : 'border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800',
+            ].join(' ')}
+          >
+            Turn {option.turn} · {option.goingFirst ? 'going first' : 'going second'}
+          </button>
+        ))}
+      </div>
+
+      <div className="space-y-3">
+        {example.turns.map((turn) => (
+          <div key={turn.turn}>
+            <h4 className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
+              Turn {turn.turn}
+              {turn.turn === example.turn && ' · board complete'}
+            </h4>
+            <ol className="mt-1 space-y-1 text-sm">
+              {turn.steps.map((step, position) => (
+                <li key={`${position}-${step}`} className="flex gap-2">
+                  <span className="tnum w-5 shrink-0 text-right text-xs text-slate-400">
+                    {position + 1}.
+                  </span>
+                  <span>{step}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        ))}
+      </div>
+
+      {/* Keyed on the game, so picking another rewinds to its deal. */}
+      <ReplayPlayer
+        key={index}
+        frames={example.turns.flatMap((turn) => turn.frames)}
+        cards={cards}
+      />
     </div>
   )
 }

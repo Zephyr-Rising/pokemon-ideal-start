@@ -98,3 +98,43 @@ describe('each part of the board', () => {
     }
   })
 }, 120_000)
+
+describe('example games', () => {
+  const cards = load('dragapult-munkidori')
+  const g = goal({ active: slot('a', keyOf(cards, 'Drakloak')) })
+  const result = turnsTest(cards, g, labelFor(cards), { trials: 60, seed: 4 })
+
+  it('lists them fastest first', () => {
+    const turns = result.examples.map((e) => e.turn)
+    expect(turns).toEqual([...turns].sort((a, b) => a - b))
+    expect(result.examples.length).toBeGreaterThan(0)
+  })
+
+  it('has one for every turn, and order, that some game built the board on', () => {
+    for (const [order, goingFirst] of [
+      [result.goingFirst, true],
+      [result.goingSecond, false],
+    ] as const) {
+      order.byTurn.forEach((share, i) => {
+        const shown = result.examples.filter((e) => e.turn === i + 1 && e.goingFirst === goingFirst)
+        expect(shown).toHaveLength(share > 0 ? 1 : 0)
+      })
+    }
+  })
+
+  it('plays each one turn by turn up to the turn it got there', () => {
+    for (const example of result.examples) {
+      expect(example.turns.map((t) => t.turn)).toEqual(
+        Array.from({ length: example.turn }, (_, i) => i + 1),
+      )
+      // Each later turn opens with its draw, and every step has a frame.
+      for (const turn of example.turns) {
+        expect(turn.frames.length).toBeGreaterThan(0)
+        if (turn.turn > 1) expect(turn.steps[0]).toBe(`Turn ${turn.turn}: draw a card`)
+      }
+      // Evolving is how a Drakloak board is built.
+      const all = example.turns.flatMap((t) => t.steps).join('\n')
+      expect(all).toMatch(/Evolve .+ into Drakloak|evolving .+ into Drakloak/)
+    }
+  })
+}, 120_000)

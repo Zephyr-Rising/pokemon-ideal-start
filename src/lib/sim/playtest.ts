@@ -280,7 +280,7 @@ function interleave<T>(a: T[], b: T[]): T[] {
   return out
 }
 
-const toHand = (cards: DeckCard[]): ExampleCard[] =>
+export const toHand = (cards: DeckCard[]): ExampleCard[] =>
   cards.map((card) => ({ cardKey: card.key, label: card.label }))
 
 /** The table before anything is placed. */
@@ -292,7 +292,7 @@ const emptyBoard = (handCount: number): ExampleBoard => ({
 })
 
 /** Trim a finished state to the handful of fields the results panel renders. */
-function toExampleBoard(state: SimState): ExampleBoard {
+export function toExampleBoard(state: SimState): ExampleBoard {
   const slot = (entry: SimState['bench'][number]): ExampleSlot => ({
     cardKey: entry.card.key,
     label: entry.card.label,

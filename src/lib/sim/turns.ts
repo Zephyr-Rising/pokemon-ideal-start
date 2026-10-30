@@ -2,7 +2,15 @@ import { goalIsEmpty, type FieldGoal, type GoalScore } from '../board/goal'
 import type { DeckCard } from '../types'
 import type { ActionContext } from './actions'
 import { buildContext } from './context'
-import { ignoredCards, physicalDeck, playDeal, type Deal } from './playtest'
+import {
+  ignoredCards,
+  physicalDeck,
+  playDeal,
+  toExampleBoard,
+  toHand,
+  type Deal,
+  type ExampleFrame,
+} from './playtest'
 import { mulberry32, shuffled } from './rng'
 import { searchBestLine } from './search'
 import { isBasicPokemon, startNextTurn, type SimState } from './state'
@@ -55,6 +63,21 @@ export interface TurnsOrderResult {
   mean: number | null
 }
 
+/** One turn of an example game: the readable steps, and frames to replay. */
+export interface TurnsExampleTurn {
+  turn: number
+  steps: string[]
+  frames: ExampleFrame[]
+}
+
+/** One game played out turn by turn, to the turn it built the board. */
+export interface TurnsExample {
+  /** The turn the board came together. */
+  turn: number
+  goingFirst: boolean
+  turns: TurnsExampleTurn[]
+}
+
 /** The same figures for one part of the board on its own. */
 export interface TurnsPartStat extends TurnsOrderResult {
   id: string
@@ -75,6 +98,11 @@ export interface TurnsResult extends TurnsOrderDetail {
   ignored: string[]
   /** Games in which some turn's search hit its budget. */
   truncated: number
+  /**
+   * Example games, fastest first: one for every turn some game built the board
+   * on, from each turn order where both managed it.
+   */
+  examples: TurnsExample[]
 }
 
 /** Plays one deal out over up to MAX_TURNS turns; the turn it got there, or null. */
@@ -99,7 +127,10 @@ function turnsToBuild(
   const first = playDeal(deal, goal, ctx, labelFor, maxNodes, goingFirst)
   let hitBudget = first.hitBudget
   record(first.score, 1)
-  if (first.score.strict) return { turn: 1, hitBudget, parts }
+  // Kept as the search left it; turned into readable frames only if this game
+  // becomes an example, which most never do.
+  const later: LaterTurn[] = []
+  if (first.score.strict) return { turn: 1, hitBudget, parts, first: first.frames, later }
 
   let state: SimState | null = first.finalState
   for (let turn = 2; turn <= MAX_TURNS && state; turn++) {
@@ -109,10 +140,50 @@ function turnsToBuild(
     const result = searchBestLine(started, goal, ctx, labelFor, { maxNodes })
     if (!result.exhausted) hitBudget = true
     record(result.score, turn)
-    if (result.score.strict) return { turn, hitBudget, parts }
+    later.push({ turn, started, steps: result.steps, frames: result.frames })
+    if (result.score.strict) return { turn, hitBudget, parts, first: first.frames, later }
     state = result.finalState
   }
-  return { turn: null, hitBudget, parts }
+  return { turn: null, hitBudget, parts, first: first.frames, later }
+}
+
+/** A turn after the first, as the search left it. */
+interface LaterTurn {
+  turn: number
+  /** The board once the turn's card is drawn. */
+  started: SimState
+  steps: string[]
+  frames: SimState[]
+}
+
+/** Turn a game's history into an example: steps grouped by turn, plus frames. */
+function toTurnsExample(game: GameOutcome, goingFirst: boolean): TurnsExample {
+  const turns: TurnsExampleTurn[] = [
+    {
+      turn: 1,
+      // The first frame is the deal itself, which has no step of its own.
+      steps: game.first.slice(1).map((frame) => frame.step),
+      frames: game.first,
+    },
+  ]
+  for (const later of game.later) {
+    const draw: ExampleFrame = {
+      step: `Turn ${later.turn}: draw a card`,
+      board: toExampleBoard(later.started),
+      hand: toHand(later.started.hand),
+    }
+    const plays = later.frames.map((state, i) => ({
+      step: later.steps[i],
+      board: toExampleBoard(state),
+      hand: toHand(state.hand),
+    }))
+    turns.push({
+      turn: later.turn,
+      steps: [draw.step, ...plays.map((frame) => frame.step)],
+      frames: [draw, ...plays],
+    })
+  }
+  return { turn: game.turn!, goingFirst, turns }
 }
 
 interface GameOutcome {
@@ -121,6 +192,9 @@ interface GameOutcome {
   hitBudget: boolean
   /** The turn each part first came together, or null. */
   parts: Map<string, { label: string; turn: number | null }>
+  /** Turn 1's frames, deal first. */
+  first: ExampleFrame[]
+  later: LaterTurn[]
 }
 
 /** Running tally of the turn each game got there, for one order. */
@@ -193,11 +267,13 @@ export function turnsTest(
     mulliganRate: 0,
     ignored,
     truncated: 0,
+    examples: [],
   }
   if (deck.length < 13 || !deck.some(isBasicPokemon) || goalIsEmpty(goal)) return blank
 
   const first = new TurnTally()
   const second = new TurnTally()
+  const examples = new Map<string, TurnsExample>()
   let mulligans = 0
   let deals = 0
   let truncated = 0
@@ -219,6 +295,15 @@ export function turnsTest(
     const asSecond = turnsToBuild(deal, goal, ctx, labelFor, maxNodes, false)
     first.add(asFirst)
     second.add(asSecond)
+    // One example per turn the board came together on, per turn order.
+    for (const [game, goingFirst] of [
+      [asFirst, true],
+      [asSecond, false],
+    ] as const) {
+      if (game.turn === null) continue
+      const key = `${game.turn}|${goingFirst}`
+      if (!examples.has(key)) examples.set(key, toTurnsExample(game, goingFirst))
+    }
     if (asFirst.hitBudget || asSecond.hitBudget) truncated++
 
     if (options.onProgress && (trial + 1) % (options.progressEvery ?? 5) === 0) {
@@ -246,5 +331,9 @@ export function turnsTest(
     mulliganRate: deals === 0 ? 0 : mulligans / deals,
     ignored,
     truncated,
+    // Fastest first; going first before going second within a turn.
+    examples: [...examples.values()].sort(
+      (a, b) => a.turn - b.turn || Number(b.goingFirst) - Number(a.goingFirst),
+    ),
   }
 }

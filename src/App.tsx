@@ -170,6 +170,7 @@ export default function App() {
                 <TurnsResults
                   goal={goal}
                   state={turns}
+                  cards={deck.cards}
                   onFewer={
                     turnTrials > TURN_TRIAL_CHOICES[0]
                       ? () => setTurnTrials(TURN_TRIAL_CHOICES[0])
