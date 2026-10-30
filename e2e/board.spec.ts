@@ -226,6 +226,8 @@ test('shows how many turns a board takes, in its own tab', async ({ page }) => {
   await expect(page.getByTestId('turns-distribution').getByText('Turn 6')).toBeVisible()
   // Each part's own pace is listed.
   await expect(page.getByTestId('turns-parts').getByText('2 or more benched')).toBeVisible()
+  // And how luck moves it.
+  await expect(page.getByTestId('turns-luck').getByText('Typical game')).toBeVisible()
   // Example games, each played out with a replay.
   const examples = page.getByTestId('turns-examples')
   await expect(examples.getByRole('button', { name: /^Turn \d · going (first|second)$/ }).first()).toBeVisible()

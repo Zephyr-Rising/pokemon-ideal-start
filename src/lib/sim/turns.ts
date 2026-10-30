@@ -12,6 +12,7 @@ import {
   type ExampleFrame,
 } from './playtest'
 import { mulberry32, shuffled } from './rng'
+import { luckCounters, summariseLuck, type LuckRecord, type LuckStat } from './luck'
 import { boardRequirements, PrizeLockTally, prizeLocks, type PrizeLockStat } from './prizes'
 import { lineOf, outranks, searchBestLine, type Alternative } from './search'
 import { inPlay, isBasicPokemon, signature, startNextTurn, type SimState } from './state'
@@ -100,6 +101,8 @@ export interface TurnsResult extends TurnsOrderDetail {
    * never built in `byTurn`; per-part figures leave them out.
    */
   prizeLocked: PrizeLockStat
+  /** How much the luck of the deal moves the turn, and which luck. */
+  luck: LuckStat
   mulliganRate: number
   ignored: string[]
   /** Games in which some turn's search hit its budget. */
@@ -388,6 +391,7 @@ export function turnsTest(
     goingFirst: none,
     goingSecond: none,
     prizeLocked: new PrizeLockTally().stat(0),
+    luck: summariseLuck([]),
     mulliganRate: 0,
     ignored,
     truncated: 0,
@@ -402,6 +406,9 @@ export function turnsTest(
   const requirements = boardRequirements(goal, cards, labelFor)
   const locked = new PrizeLockTally()
   const examples = new Map<string, TurnsExample>()
+  // The goal's pieces never change between deals, so they are worked out once.
+  const luck = luckCounters(buildContext(goal, () => 0, seed, cards).relevant)
+  const luckRecords: LuckRecord[] = []
   let mulligans = 0
   let deals = 0
   let truncated = 0
@@ -426,6 +433,8 @@ export function turnsTest(
       locked.add(locks)
       first.locked++
       second.locked++
+      // Never built, in either turn order.
+      luckRecords.push(luck.record(deal.hand, deal.prizes, null), luck.record(deal.hand, deal.prizes, null))
       if (options.onProgress && (trial + 1) % (options.progressEvery ?? 5) === 0) {
         options.onProgress(trial + 1, trials)
       }
@@ -438,6 +447,10 @@ export function turnsTest(
     const asSecond = turnsToBuild(deal, goal, ctx, labelFor, maxNodes, false)
     first.add(asFirst)
     second.add(asSecond)
+    luckRecords.push(
+      luck.record(deal.hand, deal.prizes, asFirst.turn),
+      luck.record(deal.hand, deal.prizes, asSecond.turn),
+    )
     // One example per turn the board came together on, per turn order.
     for (const [game, goingFirst] of [
       [asFirst, true],
@@ -474,6 +487,7 @@ export function turnsTest(
     goingFirst,
     goingSecond,
     prizeLocked: locked.stat(trials),
+    luck: summariseLuck(luckRecords),
     mulliganRate: deals === 0 ? 0 : mulligans / deals,
     ignored,
     truncated,

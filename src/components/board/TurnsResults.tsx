@@ -2,6 +2,7 @@ import { useState } from 'react'
 
 import { goalIsEmpty, type FieldGoal } from '../../lib/board/goal'
 import { pct, plural } from '../../lib/format'
+import type { LuckStat } from '../../lib/sim/luck'
 import {
   MAX_TURNS,
   type TurnsExample,
@@ -157,6 +158,8 @@ export function TurnsResults({ goal, state, cards, onFewer }: Props) {
             </p>
             <Distribution result={result} />
           </div>
+
+          {result.luck.factors.length > 0 && <Luck luck={result.luck} />}
 
           {result.examples.length > 0 && (
             <TurnExamples
@@ -387,6 +390,93 @@ function TurnExamples({ examples, cards }: { examples: TurnsExample[]; cards: De
         frames={example.turns.flatMap((turn) => turn.frames)}
         cards={cards}
       />
+    </div>
+  )
+}
+
+const PERCENTILE_LABELS: Record<number, string> = {
+  0.1: 'Luckiest 10%',
+  0.25: 'Luckiest quarter',
+  0.5: 'Typical game',
+  0.75: 'Unluckiest quarter',
+  0.9: 'Unluckiest 10%',
+}
+
+/**
+ * How far luck alone moves the turn, and which luck: the spread across every
+ * game, then the games grouped by what the deal gave them before a card was
+ * played.
+ */
+function Luck({ luck }: { luck: LuckStat }) {
+  return (
+    <div
+      data-testid="turns-luck"
+      className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"
+    >
+      <h3 className="text-sm font-semibold">How luck changes it</h3>
+      <p className="mt-0.5 mb-3 text-xs text-slate-500">
+        The same deck and the same plan, dealt different hands. Each figure is the turn by which
+        that share of games has the board.
+      </p>
+
+      <ol className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+        {luck.percentiles.map(({ share, turn }) => (
+          <li
+            key={share}
+            className={[
+              'rounded-lg px-3 py-2',
+              share === 0.5
+                ? 'bg-emerald-50 dark:bg-emerald-950/40'
+                : 'bg-slate-50 dark:bg-slate-800/60',
+            ].join(' ')}
+          >
+            <div className="text-xs text-slate-500">{PERCENTILE_LABELS[share]}</div>
+            <div className="tnum text-lg font-semibold">
+              {turn === null ? `after turn ${MAX_TURNS}` : `turn ${turn}`}
+            </div>
+          </li>
+        ))}
+      </ol>
+
+      <div className="mt-4 space-y-4">
+        {luck.factors.map((factor) => (
+          <table key={factor.name} className="w-full text-sm">
+            <caption className="mb-1 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase">
+              {factor.name}
+            </caption>
+            <thead>
+              <tr className="text-left text-xs text-slate-500">
+                <th scope="col" className="pb-1 font-normal" />
+                <th scope="col" className="pb-1 text-right font-normal">
+                  Games
+                </th>
+                <th scope="col" className="pb-1 text-right font-normal">
+                  Median
+                </th>
+                <th scope="col" className="pb-1 text-right font-normal">
+                  Average
+                </th>
+                <th scope="col" className="pb-1 text-right font-normal">
+                  By turn {MAX_TURNS}
+                </th>
+              </tr>
+            </thead>
+            <tbody className="tnum">
+              {factor.buckets.map((bucket) => (
+                <tr key={bucket.label} className="border-t border-slate-100 dark:border-slate-800">
+                  <th scope="row" className="py-1 text-left font-normal">
+                    {bucket.label}
+                  </th>
+                  <td className="py-1 text-right text-slate-500">{pct(bucket.share)}</td>
+                  <td className="py-1 text-right">{medianText(bucket)}</td>
+                  <td className="py-1 text-right">{meanText(bucket)}</td>
+                  <td className="py-1 text-right font-medium">{pct(bucket.reached)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ))}
+      </div>
     </div>
   )
 }

@@ -138,3 +138,21 @@ describe('example games', () => {
     }
   })
 }, 120_000)
+
+describe('luck', () => {
+  const cards = load('dragapult-munkidori')
+  const g = goal({ active: slot('a', keyOf(cards, 'Drakloak')) })
+  const result = turnsTest(cards, g, labelFor(cards), { trials: 40, seed: 6 })
+
+  it('puts the typical game at the median', () => {
+    const typical = result.luck.percentiles.find((p) => p.share === 0.5)!.turn
+    expect(typical).toBe(result.median)
+  })
+
+  it('accounts for every game in each grouping', () => {
+    for (const factor of result.luck.factors) {
+      const total = factor.buckets.reduce((sum, b) => sum + b.share, 0)
+      expect(total).toBeCloseTo(1, 10)
+    }
+  })
+}, 120_000)
