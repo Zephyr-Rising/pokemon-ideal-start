@@ -7,16 +7,18 @@ import type { DeckCard } from '../../lib/types'
 import type { PlaytestState } from '../../lib/use-playtest'
 import { Combinations } from './Combinations'
 import { ReplayPlayer } from './ReplayPlayer'
+import { SimulationProgress } from './SimulationProgress'
 
 interface Props {
   goal: FieldGoal
   state: PlaytestState
-  trials: number
   /** The resolved deck, for the card images the replay shows. */
   cards: DeckCard[]
+  /** Switch to the smallest game count, offered when a run is slow. */
+  onFewer?: () => void
 }
 
-export function PlaytestResults({ goal, state, trials, cards }: Props) {
+export function PlaytestResults({ goal, state, cards, onFewer }: Props) {
   if (goalIsEmpty(goal)) {
     return (
       <section className="space-y-3">
@@ -29,7 +31,7 @@ export function PlaytestResults({ goal, state, trials, cards }: Props) {
     )
   }
 
-  const { result, running, progress, error } = state
+  const { result, running, progress, total, startedAt, error } = state
 
   return (
     <section className="space-y-3">
@@ -41,10 +43,14 @@ export function PlaytestResults({ goal, state, trials, cards }: Props) {
         </p>
       )}
 
-      {!result && running && (
-        <p className="rounded-lg bg-slate-100 px-3 py-6 text-center text-sm text-slate-600 dark:bg-slate-900 dark:text-slate-400">
-          Playing out {trials.toLocaleString()} games… {progress.toLocaleString()} done
-        </p>
+      {running && (
+        <SimulationProgress
+          progress={progress}
+          total={total}
+          startedAt={startedAt}
+          updating={result !== null}
+          onFewer={onFewer}
+        />
       )}
 
       {result && (

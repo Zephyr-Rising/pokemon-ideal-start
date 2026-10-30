@@ -1,12 +1,14 @@
 import { goalIsEmpty, type FieldGoal } from '../../lib/board/goal'
 import { pct, plural } from '../../lib/format'
-import { MAX_TURNS, type TurnsOrderResult } from '../../lib/sim/turns'
+import { MAX_TURNS, type TurnsOrderResult, type TurnsResult } from '../../lib/sim/turns'
 import type { TurnsState } from '../../lib/use-playtest'
+import { SimulationProgress } from './SimulationProgress'
 
 interface Props {
   goal: FieldGoal
   state: TurnsState
-  trials: number
+  /** Switch to the smallest game count, offered when a run is slow. */
+  onFewer?: () => void
 }
 
 /** "Turn 3", or a plain statement when fewer than half the games get there. */
@@ -16,7 +18,7 @@ const medianText = (order: TurnsOrderResult): string =>
 const meanText = (order: TurnsOrderResult): string =>
   order.mean === null ? '—' : order.mean.toFixed(1)
 
-export function TurnsResults({ goal, state, trials }: Props) {
+export function TurnsResults({ goal, state, onFewer }: Props) {
   if (goalIsEmpty(goal)) {
     return (
       <section className="space-y-3">
@@ -29,7 +31,7 @@ export function TurnsResults({ goal, state, trials }: Props) {
     )
   }
 
-  const { result, running, progress, error } = state
+  const { result, running, progress, total, startedAt, error } = state
 
   return (
     <section className="space-y-3">
@@ -41,11 +43,14 @@ export function TurnsResults({ goal, state, trials }: Props) {
         </p>
       )}
 
-      {!result && running && (
-        <p className="rounded-lg bg-slate-100 px-3 py-6 text-center text-sm text-slate-600 dark:bg-slate-900 dark:text-slate-400">
-          Playing out {trials.toLocaleString()} games, up to {MAX_TURNS} turns each…{' '}
-          {progress.toLocaleString()} done
-        </p>
+      {running && (
+        <SimulationProgress
+          progress={progress}
+          total={total}
+          startedAt={startedAt}
+          updating={result !== null}
+          onFewer={onFewer}
+        />
       )}
 
       {result && (
@@ -125,6 +130,8 @@ export function TurnsResults({ goal, state, trials }: Props) {
               {MAX_TURNS}.
             </p>
           </div>
+
+          {result.parts.length > 1 && <PartTurns result={result} />}
 
           <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
             <h3 className="text-sm font-semibold">The turn it comes together</h3>
@@ -220,5 +227,66 @@ function Distribution({ result }: { result: TurnsOrderResult & { goingFirst: Tur
         </tr>
       </tbody>
     </table>
+  )
+}
+
+/**
+ * Each part of the board on its own: which turn it usually comes together,
+ * and how often it has by the last turn played. Slowest first, since that is
+ * the part holding the whole board back.
+ */
+function PartTurns({ result }: { result: TurnsResult }) {
+  const order = (id: string, side: TurnsResult['goingFirst']) =>
+    side.parts.find((part) => part.id === id)
+  // A part with no median is slower than any that has one.
+  const pace = (part: TurnsOrderResult) => part.median ?? MAX_TURNS + 1
+  const parts = [...result.parts].sort(
+    (a, b) => pace(b) - pace(a) || (b.mean ?? 0) - (a.mean ?? 0) || a.reached - b.reached,
+  )
+
+  return (
+    <div
+      data-testid="turns-parts"
+      className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"
+    >
+      <h3 className="text-sm font-semibold">Each part of the board</h3>
+      <p className="mt-0.5 mb-3 text-xs text-slate-500">
+        The turn each piece usually comes together on its own. The part at the top is the one
+        holding the whole board back. The bar is how often it is in place by turn {MAX_TURNS}.
+      </p>
+      <ul className="space-y-2">
+        {parts.map((part) => {
+          const first = order(part.id, result.goingFirst)
+          const second = order(part.id, result.goingSecond)
+          return (
+            <li key={part.id} className="space-y-1">
+              <div className="flex items-baseline justify-between gap-2 text-sm">
+                <span className="truncate">{part.label}</span>
+                <span className="flex shrink-0 items-baseline gap-2">
+                  <span className="tnum text-xs text-slate-500">
+                    1st {first ? medianText(first) : '—'} · 2nd {second ? medianText(second) : '—'}
+                  </span>
+                  <span className="tnum font-medium">
+                    {medianText(part)}
+                    {part.mean !== null && (
+                      <span className="font-normal text-slate-500"> · avg {part.mean.toFixed(1)}</span>
+                    )}
+                  </span>
+                </span>
+              </div>
+              <div
+                className="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"
+                role="presentation"
+              >
+                <div
+                  className="h-full rounded-full bg-emerald-500"
+                  style={{ width: `${part.reached * 100}%` }}
+                />
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
   )
 }

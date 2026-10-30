@@ -210,6 +210,10 @@ test('shows how many turns a board takes, in its own tab', async ({ page }) => {
   // The board is shared with the Turn 1 tab.
   await page.getByRole('button', { name: 'Pick Mega Kangaskhan ex' }).click()
   await page.getByRole('button', { name: 'Place in Active spot' }).click()
+  await page.getByLabel('Minimum benched Pokémon').fill('2')
+
+  // A run in flight shows how far it has got.
+  await expect(page.getByTestId('simulation-progress').getByRole('progressbar')).toBeVisible()
 
   const median = page.getByTestId('turns-median')
   await expect(median).toBeVisible({ timeout: 90_000 })
@@ -218,6 +222,8 @@ test('shows how many turns a board takes, in its own tab', async ({ page }) => {
   await expect(page.getByTestId('turns-first')).toBeVisible()
   await expect(page.getByTestId('turns-second')).toBeVisible()
   await expect(page.getByTestId('turns-distribution').getByText('Turn 6')).toBeVisible()
+  // Each part's own pace is listed.
+  await expect(page.getByTestId('turns-parts').getByText('2 or more benched')).toBeVisible()
 
   // Switching tabs keeps the board.
   await page.getByRole('tab', { name: 'Turn 1 board' }).click()

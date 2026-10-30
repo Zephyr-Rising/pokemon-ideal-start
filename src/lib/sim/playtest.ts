@@ -235,7 +235,7 @@ export function playtest(
       closest = toExample(asSecond, false)
     }
 
-    if (options.onProgress && (trial + 1) % (options.progressEvery ?? 100) === 0) {
+    if (options.onProgress && (trial + 1) % (options.progressEvery ?? 25) === 0) {
       options.onProgress(trial + 1, trials)
     }
   }

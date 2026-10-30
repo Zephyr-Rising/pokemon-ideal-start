@@ -167,7 +167,15 @@ export default function App() {
             ) : tab === 'turns' ? (
               <div role="tabpanel" className="space-y-10">
                 <BoardEditor cards={deck.cards} goal={goal} onChange={setGoal} horizon="turns" />
-                <TurnsResults goal={goal} state={turns} trials={turnTrials} />
+                <TurnsResults
+                  goal={goal}
+                  state={turns}
+                  onFewer={
+                    turnTrials > TURN_TRIAL_CHOICES[0]
+                      ? () => setTurnTrials(TURN_TRIAL_CHOICES[0])
+                      : undefined
+                  }
+                />
                 <TrialPicker
                   value={turnTrials}
                   choices={TURN_TRIAL_CHOICES}
@@ -180,8 +188,8 @@ export default function App() {
                 <PlaytestResults
                   goal={goal}
                   state={playtest}
-                  trials={trials}
                   cards={deck.cards}
+                  onFewer={trials > TRIAL_CHOICES[0] ? () => setTrials(TRIAL_CHOICES[0]) : undefined}
                 />
                 <TrialPicker value={trials} choices={TRIAL_CHOICES} onChange={setTrials} />
               </div>

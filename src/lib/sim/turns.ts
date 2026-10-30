@@ -1,4 +1,4 @@
-import { goalIsEmpty, type FieldGoal } from '../board/goal'
+import { goalIsEmpty, type FieldGoal, type GoalScore } from '../board/goal'
 import type { DeckCard } from '../types'
 import type { ActionContext } from './actions'
 import { buildContext } from './context'
@@ -47,11 +47,22 @@ export interface TurnsOrderResult {
   mean: number | null
 }
 
-export interface TurnsResult extends TurnsOrderResult {
+/** The same figures for one part of the board on its own. */
+export interface TurnsPartStat extends TurnsOrderResult {
+  id: string
+  label: string
+}
+
+/** One turn order's figures, for the whole board and each part of it. */
+export interface TurnsOrderDetail extends TurnsOrderResult {
+  parts: TurnsPartStat[]
+}
+
+export interface TurnsResult extends TurnsOrderDetail {
   trials: number
   /** No Supporter on the first turn of the game. */
-  goingFirst: TurnsOrderResult
-  goingSecond: TurnsOrderResult
+  goingFirst: TurnsOrderDetail
+  goingSecond: TurnsOrderDetail
   mulliganRate: number
   ignored: string[]
   /** Games in which some turn's search hit its budget. */
@@ -66,10 +77,21 @@ function turnsToBuild(
   labelFor: (cardKey: string) => string,
   maxNodes: number | undefined,
   goingFirst: boolean,
-): { turn: number | null; hitBudget: boolean } {
+): GameOutcome {
+  // The first turn each part of the board was in place at the end of a turn.
+  const parts = new Map<string, { label: string; turn: number | null }>()
+  const record = (score: GoalScore, turn: number) => {
+    for (const part of score.parts) {
+      const entry = parts.get(part.id) ?? { label: part.label, turn: null }
+      if (part.met && entry.turn === null) entry.turn = turn
+      parts.set(part.id, entry)
+    }
+  }
+
   const first = playDeal(deal, goal, ctx, labelFor, maxNodes, goingFirst)
   let hitBudget = first.hitBudget
-  if (first.score.strict) return { turn: 1, hitBudget }
+  record(first.score, 1)
+  if (first.score.strict) return { turn: 1, hitBudget, parts }
 
   let state: SimState | null = first.finalState
   for (let turn = 2; turn <= MAX_TURNS && state; turn++) {
@@ -78,24 +100,52 @@ function turnsToBuild(
     const started = startNextTurn(state)
     const result = searchBestLine(started, goal, ctx, labelFor, { maxNodes })
     if (!result.exhausted) hitBudget = true
-    if (result.score.strict) return { turn, hitBudget }
+    record(result.score, turn)
+    if (result.score.strict) return { turn, hitBudget, parts }
     state = result.finalState
   }
-  return { turn: null, hitBudget }
+  return { turn: null, hitBudget, parts }
+}
+
+interface GameOutcome {
+  /** The turn the whole board came together, or null. */
+  turn: number | null
+  hitBudget: boolean
+  /** The turn each part first came together, or null. */
+  parts: Map<string, { label: string; turn: number | null }>
 }
 
 /** Running tally of the turn each game got there, for one order. */
 class TurnTally {
-  readonly counts: number[] = Array.from({ length: MAX_TURNS }, () => 0)
+  readonly counts: number[] = emptyCounts()
+  /** Per part, in first-seen order: how many games first had it on each turn. */
+  readonly parts = new Map<string, { label: string; counts: number[] }>()
 
-  add(turn: number | null): void {
-    if (turn !== null) this.counts[turn - 1]++
+  add(game: GameOutcome): void {
+    if (game.turn !== null) this.counts[game.turn - 1]++
+    for (const [id, part] of game.parts) {
+      const entry = this.parts.get(id) ?? { label: part.label, counts: emptyCounts() }
+      if (part.turn !== null) entry.counts[part.turn - 1]++
+      this.parts.set(id, entry)
+    }
   }
 
-  result(trials: number): TurnsOrderResult {
-    return summarise(this.counts.map((count) => count / trials))
+  result(trials: number): TurnsOrderDetail {
+    return {
+      ...summarise(this.counts.map((count) => count / trials)),
+      parts: [...this.parts].map(([id, part]) => ({
+        id,
+        label: part.label,
+        ...summarise(part.counts.map((count) => count / trials)),
+      })),
+    }
   }
 }
+
+const emptyCounts = () => Array.from({ length: MAX_TURNS }, () => 0)
+
+/** The fair-coin average of two distributions over turns. */
+const averageTurns = (a: number[], b: number[]) => a.map((share, i) => (share + b[i]) / 2)
 
 /** Median and mean from a distribution over turns; the rest never got there. */
 export function summarise(byTurn: number[]): TurnsOrderResult {
@@ -126,7 +176,7 @@ export function turnsTest(
   const deck = physicalDeck(cards)
   const ignored = ignoredCards(cards)
 
-  const none = summarise(Array.from({ length: MAX_TURNS }, () => 0))
+  const none: TurnsOrderDetail = { ...summarise(emptyCounts()), parts: [] }
   const blank: TurnsResult = {
     ...none,
     trials: 0,
@@ -158,11 +208,11 @@ export function turnsTest(
 
     const asFirst = turnsToBuild(deal, goal, ctx, labelFor, options.maxNodes, true)
     const asSecond = turnsToBuild(deal, goal, ctx, labelFor, options.maxNodes, false)
-    first.add(asFirst.turn)
-    second.add(asSecond.turn)
+    first.add(asFirst)
+    second.add(asSecond)
     if (asFirst.hitBudget || asSecond.hitBudget) truncated++
 
-    if (options.onProgress && (trial + 1) % (options.progressEvery ?? 25) === 0) {
+    if (options.onProgress && (trial + 1) % (options.progressEvery ?? 5) === 0) {
       options.onProgress(trial + 1, trials)
     }
   }
@@ -170,9 +220,15 @@ export function turnsTest(
   const goingFirst = first.result(trials)
   const goingSecond = second.result(trials)
   // The fair-coin average: each turn's share is the mean of the two orders.
-  const overall = summarise(
-    goingFirst.byTurn.map((share, i) => (share + goingSecond.byTurn[i]) / 2),
-  )
+  const secondParts = new Map(goingSecond.parts.map((part) => [part.id, part]))
+  const overall: TurnsOrderDetail = {
+    ...summarise(averageTurns(goingFirst.byTurn, goingSecond.byTurn)),
+    parts: goingFirst.parts.map((part) => ({
+      id: part.id,
+      label: part.label,
+      ...summarise(averageTurns(part.byTurn, secondParts.get(part.id)?.byTurn ?? emptyCounts())),
+    })),
+  }
   return {
     ...overall,
     trials,

@@ -13,9 +13,15 @@ export interface SimulationState<R> {
   result: R | null
   /** Trials completed in the run currently in flight. */
   progress: number
+  /** Trials the run in flight will play. */
+  total: number
+  /** When the run in flight started, from `performance.now()`. */
+  startedAt: number | null
   running: boolean
   error: string | null
 }
+
+const idle = { progress: 0, total: 0, startedAt: null, running: false, error: null }
 
 export type PlaytestState = SimulationState<ResultOf['board']>
 export type TurnsState = SimulationState<ResultOf['turns']>
@@ -47,12 +53,7 @@ export function useSimulation<M extends SimulationMode>(
   const lastRun = useRef<{ cards: DeckCard[]; goal: FieldGoal; trials: number; seed: number } | null>(
     null,
   )
-  const [state, setState] = useState<SimulationState<ResultOf[M]>>({
-    result: null,
-    progress: 0,
-    running: false,
-    error: null,
-  })
+  const [state, setState] = useState<SimulationState<ResultOf[M]>>({ result: null, ...idle })
 
   useEffect(() => {
     const worker = new Worker(new URL('../worker/playtest.worker.ts', import.meta.url), {
@@ -66,16 +67,11 @@ export function useSimulation<M extends SimulationMode>(
       if (message.id !== requestId.current) return
 
       if (message.kind === 'progress') {
-        setState((current) => ({ ...current, progress: message.done }))
+        setState((current) => ({ ...current, progress: message.done, total: message.total }))
       } else if (message.kind === 'done') {
-        setState({
-          result: message.result as ResultOf[M],
-          progress: 0,
-          running: false,
-          error: null,
-        })
+        setState({ result: message.result as ResultOf[M], ...idle })
       } else {
-        setState({ result: null, progress: 0, running: false, error: message.message })
+        setState({ result: null, ...idle, error: message.message })
       }
     }
 
@@ -91,7 +87,7 @@ export function useSimulation<M extends SimulationMode>(
     if (!enabled) return
     if (cards.length === 0 || goalIsEmpty(goal)) {
       lastRun.current = null
-      setState({ result: null, progress: 0, running: false, error: null })
+      setState({ result: null, ...idle })
       return
     }
     const last = lastRun.current
@@ -110,7 +106,14 @@ export function useSimulation<M extends SimulationMode>(
       if (!worker) return
       const id = ++requestId.current
       lastRun.current = { cards, goal, trials, seed }
-      setState((current) => ({ ...current, running: true, progress: 0, error: null }))
+      setState((current) => ({
+        ...current,
+        running: true,
+        progress: 0,
+        total: trials,
+        startedAt: performance.now(),
+        error: null,
+      }))
       const request: PlaytestRequest = { id, mode, cards, goal, trials, seed }
       worker.postMessage(request)
     }, DEBOUNCE_MS)
