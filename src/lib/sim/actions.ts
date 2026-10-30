@@ -14,6 +14,7 @@ import {
   attachTriggers,
   lookupEffect,
   onAttachFromHand,
+  retreatStuck,
   worthSwitching,
   type EffectContext,
 } from './effects'
@@ -26,6 +27,7 @@ import {
   energyFits,
   energyType,
   evolveSlot,
+  freesRetreat,
   inPlay,
   isEvolutionCard,
   isBasicPokemon,
@@ -131,6 +133,8 @@ function benchWorthwhile(state: SimState, ctx: ActionContext): (card: DeckCard) 
       // Looking past this turn, a Pokémon that draws from the Active Spot,
       // benched ready to be promoted (Mega Kangaskhan ex).
       (ctx.multiTurn === true && drawsWhileActive(card)) ||
+      // Latias ex, to make a retreat the Active cannot pay for free.
+      (freesRetreat(card) && retreatStuck(state, ctx)) ||
       // When Energy counts on any Pokémon (a total-Energy condition), each
       // accelerator is more Energy: a second Teal Mask Ogerpon ex dances too.
       (ctx.wantsEnergy && ctx.energyTargets.size === 0 && abilityOf(card)?.accelerates === true) ||

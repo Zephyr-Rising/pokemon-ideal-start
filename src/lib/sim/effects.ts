@@ -12,9 +12,11 @@ import {
   energyType,
   evolveSlot,
   fairShuffle,
+  freesRetreat,
   inPlay,
   isBasicPokemon,
   isEnergy,
+  retreatCost,
   shufflesAfter,
   type InPlay,
   type SimState,
@@ -224,7 +226,25 @@ export function choices(
   for (const card of pool) {
     if (allowed(card) && finishesEngine(card) && !seen.has(card.key)) seen.set(card.key, card)
   }
+  // Latias ex, when its Skyliner would free a retreat the Active cannot pay.
+  if (retreatStuck(state, ctx)) {
+    const latias = pool.find((card) => allowed(card) && freesRetreat(card))
+    if (latias && !seen.has(latias.key)) seen.set(latias.key, latias)
+  }
   return [...seen.values()]
+}
+
+/**
+ * Is the Active a Basic that should retreat into something benched, but has
+ * not the Energy to pay for it? Then Latias ex's Skyliner is the cheap way
+ * out: benching it costs no Energy, so the turn's attachment and any Energy
+ * Switch stay for the Pokémon the board needs them on.
+ */
+export function retreatStuck(state: SimState, ctx: EffectContext): boolean {
+  const active = state.active
+  if (!active || state.usedRetreat || !isBasicPokemon(active.card)) return false
+  if (active.energy.length >= retreatCost(state, active)) return false
+  return state.bench.some((slot) => worthSwitching(state, slot.card, ctx))
 }
 
 const removeFirst = (pool: DeckCard[], card: DeckCard): void => {
@@ -446,8 +466,16 @@ registerEffect("Ciphermaniac's Codebreaking", (state, ctx) => {
   // Candidates, best first: what the goal names, then engine pieces, then the
   // outs that turn a hand around. A handful are tried in pairs.
   const finishesEngine = engineWants(state)
+  // Latias ex ranks with engine pieces while the Active's retreat is stuck.
+  const stuck = retreatStuck(state, ctx)
   const rank = (card: DeckCard) =>
-    ctx.relevant.has(card.key) ? 3 : finishesEngine(card) ? 2 : isOut(card, state, ctx) ? 1 : 0
+    ctx.relevant.has(card.key)
+      ? 3
+      : finishesEngine(card) || (stuck && freesRetreat(card))
+        ? 2
+        : isOut(card, state, ctx)
+          ? 1
+          : 0
   const candidates = distinctCards(state.deck)
     .map((card, order) => ({ card, order, rank: rank(card) }))
     .filter((entry) => entry.rank > 0 && nameOf(entry.card) !== norm("Ciphermaniac's Codebreaking"))

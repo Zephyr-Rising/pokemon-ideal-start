@@ -184,6 +184,9 @@ export function energyFits(card: DeckCard, kinds: Set<string>, holder?: DeckCard
 
 const SKYLINER = norm('Latias ex')
 
+/** Latias ex: its Skyliner makes every Basic's retreat free. */
+export const freesRetreat = (card: DeckCard): boolean => nameOf(card) === SKYLINER
+
 /**
  * Retreat cost in Energy, after everything that reduces it.
  *

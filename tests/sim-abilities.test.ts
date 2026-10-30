@@ -8,7 +8,7 @@ import {
 } from '../src/lib/sim/abilities'
 import { applyAction, legalActions } from '../src/lib/sim/actions'
 import { describeStep } from '../src/lib/sim/describe'
-import { lookupEffect, worthSwitching, type EffectContext } from '../src/lib/sim/effects'
+import { choices, lookupEffect, retreatStuck, worthSwitching, type EffectContext } from '../src/lib/sim/effects'
 import { ACTIVE_TARGET, inPlay, retreatCost, type SimState } from '../src/lib/sim/state'
 import type { CardRecord, DeckCard } from '../src/lib/types'
 
@@ -118,6 +118,23 @@ describe('Run Errand (Mega Kangaskhan ex)', () => {
     const goal = mon('Slowking')
     const s = state({ active: inPlay(goal), bench: [inPlay(kang)], deck: deckOf(5) })
     expect(worthSwitching(s, kang, ctx({ activeKey: goal.key, multiTurn: true }))).toBe(false)
+  })
+
+  it('makes Latias ex worth fetching and benching when its retreat is unpaid', () => {
+    const latias = mon('Latias ex')
+    const heavy = mon('Mega Kangaskhan ex', { retreat: 2 })
+    const goal = mon('Raging Bolt ex')
+    const c = ctx({ activeKey: goal.key, wantsAnyBench: false, multiTurn: true })
+    const stuck = state({ active: inPlay(heavy), bench: [inPlay(goal)], deck: [latias] })
+    expect(retreatStuck(stuck, c)).toBe(true)
+    // Any search for a Pokémon offers it, though the goal never names it.
+    expect(choices(stuck, stuck.deck, () => true, c)).toContain(latias)
+    // From hand, it is benched.
+    const inHand = { ...stuck, deck: [], hand: [latias] }
+    expect(legalActions(inHand, c)).toContainEqual({ kind: 'bench', handIndex: 0 })
+    // Once it is out, the retreat is free and nothing is stuck.
+    const freed = { ...stuck, bench: [...stuck.bench, inPlay(latias)] }
+    expect(retreatStuck(freed, c)).toBe(false)
   })
 
   it('offers a retreat into it', () => {
