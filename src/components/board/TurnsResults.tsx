@@ -10,6 +10,7 @@ import {
 } from '../../lib/sim/turns'
 import type { DeckCard } from '../../lib/types'
 import type { TurnsState } from '../../lib/use-playtest'
+import { PrizeNote } from './PrizeNote'
 import { ReplayPlayer } from './ReplayPlayer'
 import { SimulationProgress } from './SimulationProgress'
 
@@ -140,6 +141,11 @@ export function TurnsResults({ goal, state, cards, onFewer }: Props) {
               progress. There is no opponent to interrupt it, so read this as the deck's own pace.
               The average counts only the games that get there by turn {MAX_TURNS}.
             </p>
+            <PrizeNote
+              locked={result.prizeLocked}
+              reached={result.reached}
+              what={`build it by turn ${MAX_TURNS}`}
+            />
           </div>
 
           {result.parts.length > 1 && <PartTurns result={result} />}
@@ -273,8 +279,10 @@ function PartTurns({ result }: { result: TurnsResult }) {
     >
       <h3 className="text-sm font-semibold">Each part of the board</h3>
       <p className="mt-0.5 mb-3 text-xs text-slate-500">
-        The turn each piece usually comes together on its own. The part at the top is the one
-        holding the whole board back. The bar is how often it is in place by turn {MAX_TURNS}.
+        The turn each piece usually comes together on its own
+        {result.prizeLocked.games > 0 && ', in the games where the board was possible'}. The part
+        at the top is the one holding the whole board back. The bar is how often it is in place by
+        turn {MAX_TURNS}.
       </p>
       <ul className="space-y-2">
         {parts.map((part) => {

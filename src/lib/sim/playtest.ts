@@ -4,6 +4,7 @@ import { draw, type ActionContext } from './actions'
 import { buildContext } from './context'
 import { isImplemented } from './effects'
 import { mulberry32, shuffled } from './rng'
+import { boardRequirements, PrizeLockTally, prizeLocks, type PrizeLockStat } from './prizes'
 import { searchBestLine, setupScore } from './search'
 import { cardName, inPlay, isBasicPokemon, type SimState } from './state'
 
@@ -56,6 +57,11 @@ export interface PlaytestResult extends OrderResult {
   /** No Supporter on the first turn of the game. */
   goingFirst: OrderResult
   goingSecond: OrderResult
+  /**
+   * Games the prizes made impossible before a card was played. They count as
+   * misses in `strict`; the per-part and combination figures leave them out.
+   */
+  prizeLocked: PrizeLockStat
   /** P(the opening 7 holds no Basic and is reshuffled). */
   mulliganRate: number
   /** Cards in the deck the simulator cannot play, by name. */
@@ -168,6 +174,7 @@ export function playtest(
     trials: 0,
     goingFirst: noOrder,
     goingSecond: noOrder,
+    prizeLocked: new PrizeLockTally().stat(0),
     mulliganRate: 0,
     ignored,
     truncated: 0,
@@ -182,6 +189,8 @@ export function playtest(
 
   const first = new OrderTally()
   const second = new OrderTally()
+  const requirements = boardRequirements(goal, cards, labelFor)
+  const locked = new PrizeLockTally()
   let mulligans = 0
   let deals = 0
   let truncated = 0
@@ -211,6 +220,20 @@ export function playtest(
     }
 
     const deal: Deal = { hand: order.slice(0, 7), prizes: order.slice(7, 13), rest: order.slice(13) }
+
+    // A board the prizes have already made impossible is logged as such and
+    // not played: no line can build it.
+    const locks = prizeLocks(requirements, deck, deal.prizes)
+    if (locks.length > 0) {
+      locked.add(locks)
+      first.addLocked()
+      second.addLocked()
+      if (options.onProgress && (trial + 1) % (options.progressEvery ?? 25) === 0) {
+        options.onProgress(trial + 1, trials)
+      }
+      continue
+    }
+
     const ctx = buildContext(goal, rng, seed + trial, cards)
 
     // Going second allows every play going first does, plus a Supporter, so a
@@ -251,6 +274,7 @@ export function playtest(
     trials,
     goingFirst: first.result(trials),
     goingSecond: second.result(trials),
+    prizeLocked: locked.stat(trials),
     mulliganRate: deals === 0 ? 0 : mulligans / deals,
     ignored,
     truncated,
@@ -440,6 +464,14 @@ class OrderTally {
   readonly patterns = new Map<string, number>()
   /** Per trial: 1 if the whole goal was reached, else 0. */
   readonly outcomes: number[] = []
+  /** Games the prizes made impossible; not played, so they have no parts. */
+  locked = 0
+
+  /** A game the prizes made impossible: a miss, with no parts to record. */
+  addLocked(): void {
+    this.locked++
+    this.outcomes.push(0)
+  }
 
   add(score: GoalScore): void {
     if (score.strict) this.strictHits++
@@ -459,17 +491,19 @@ class OrderTally {
 
   result(trials: number): OrderResult {
     const strict = this.strictHits / trials
+    // Parts, closeness and patterns are over the games that were played.
+    const played = Math.max(trials - this.locked, 1)
     return {
       strict,
       // 95% margin on a proportion.
       margin: 1.96 * Math.sqrt(Math.max(strict * (1 - strict), 0) / trials),
-      closeness: this.closenessTotal / trials,
+      closeness: this.closenessTotal / played,
       parts: [...this.parts].map(([id, entry]) => ({
         id,
         label: entry.label,
-        metRate: entry.hits / trials,
+        metRate: entry.hits / played,
       })),
-      patterns: patternStats(this.patterns, trials),
+      patterns: patternStats(this.patterns, played),
     }
   }
 }
@@ -508,6 +542,6 @@ function averageOrders(first: OrderTally, second: OrderTally, trials: number): O
       ...part,
       metRate: (part.metRate + (secondRate.get(part.id) ?? 0)) / 2,
     })),
-    patterns: patternStats(combined, trials),
+    patterns: patternStats(combined, Math.max(trials - first.locked, 1)),
   }
 }

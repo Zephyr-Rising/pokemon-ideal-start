@@ -276,9 +276,10 @@ describe('turn order', () => {
     for (const order of [result, result.goingFirst, result.goingSecond]) {
       const total = order.patterns.reduce((sum, p) => sum + p.rate, 0)
       expect(total).toBeCloseTo(1, 10)
-      // The all-parts pattern is the whole board.
+      // The all-parts pattern is the whole board, over the games the prizes
+      // left possible; the headline counts prize-locked games as misses too.
       const all = order.patterns.find((p) => p.met.length === order.parts.length)?.rate ?? 0
-      expect(all).toBeCloseTo(order.strict, 10)
+      expect(all * (1 - result.prizeLocked.rate)).toBeCloseTo(order.strict, 10)
     }
   })
 

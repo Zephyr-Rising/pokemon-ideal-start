@@ -12,6 +12,7 @@ import {
   type ExampleFrame,
 } from './playtest'
 import { mulberry32, shuffled } from './rng'
+import { boardRequirements, PrizeLockTally, prizeLocks, type PrizeLockStat } from './prizes'
 import { lineOf, outranks, searchBestLine, type Alternative } from './search'
 import { inPlay, isBasicPokemon, signature, startNextTurn, type SimState } from './state'
 
@@ -94,6 +95,11 @@ export interface TurnsResult extends TurnsOrderDetail {
   /** No Supporter on the first turn of the game. */
   goingFirst: TurnsOrderDetail
   goingSecond: TurnsOrderDetail
+  /**
+   * Games the prizes made impossible before a card was played. They count as
+   * never built in `byTurn`; per-part figures leave them out.
+   */
+  prizeLocked: PrizeLockStat
   mulliganRate: number
   ignored: string[]
   /** Games in which some turn's search hit its budget. */
@@ -316,6 +322,8 @@ class TurnTally {
   readonly counts: number[] = emptyCounts()
   /** Per part, in first-seen order: how many games first had it on each turn. */
   readonly parts = new Map<string, { label: string; counts: number[] }>()
+  /** Games the prizes made impossible: never built, and not played. */
+  locked = 0
 
   add(game: GameOutcome): void {
     if (game.turn !== null) this.counts[game.turn - 1]++
@@ -329,10 +337,11 @@ class TurnTally {
   result(trials: number): TurnsOrderDetail {
     return {
       ...summarise(this.counts.map((count) => count / trials)),
+      // Each part is over the games that were played.
       parts: [...this.parts].map(([id, part]) => ({
         id,
         label: part.label,
-        ...summarise(part.counts.map((count) => count / trials)),
+        ...summarise(part.counts.map((count) => count / Math.max(trials - this.locked, 1))),
       })),
     }
   }
@@ -378,6 +387,7 @@ export function turnsTest(
     trials: 0,
     goingFirst: none,
     goingSecond: none,
+    prizeLocked: new PrizeLockTally().stat(0),
     mulliganRate: 0,
     ignored,
     truncated: 0,
@@ -389,6 +399,8 @@ export function turnsTest(
 
   const first = new TurnTally()
   const second = new TurnTally()
+  const requirements = boardRequirements(goal, cards, labelFor)
+  const locked = new PrizeLockTally()
   const examples = new Map<string, TurnsExample>()
   let mulligans = 0
   let deals = 0
@@ -406,6 +418,19 @@ export function turnsTest(
       order = shuffled(deck, rng)
     }
     const deal: Deal = { hand: order.slice(0, 7), prizes: order.slice(7, 13), rest: order.slice(13) }
+
+    // A board the prizes have already made impossible is logged as such and
+    // not played — it could only ever run all six turns and miss.
+    const locks = prizeLocks(requirements, deck, deal.prizes)
+    if (locks.length > 0) {
+      locked.add(locks)
+      first.locked++
+      second.locked++
+      if (options.onProgress && (trial + 1) % (options.progressEvery ?? 5) === 0) {
+        options.onProgress(trial + 1, trials)
+      }
+      continue
+    }
     const ctx: ActionContext = { ...buildContext(goal, rng, seed + trial, cards), multiTurn: true }
 
     const maxNodes = options.maxNodes ?? TURN_MAX_NODES
@@ -448,6 +473,7 @@ export function turnsTest(
     trials,
     goingFirst,
     goingSecond,
+    prizeLocked: locked.stat(trials),
     mulliganRate: deals === 0 ? 0 : mulligans / deals,
     ignored,
     truncated,

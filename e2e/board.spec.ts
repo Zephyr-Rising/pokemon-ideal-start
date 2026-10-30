@@ -250,3 +250,14 @@ test('keeps a Special Energy as itself, not "any" Energy', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Remove one Mist Energy from Abra' })).toHaveCount(1)
   await expect(page.getByRole('button', { name: /Remove one Any Energy/ })).toHaveCount(0)
 })
+
+test('says how often the prizes make the board impossible', async ({ page }) => {
+  await openBoard(page)
+  // A single copy: about one game in ten has it prized.
+  await page.getByRole('button', { name: 'Pick Fezandipiti ex' }).click()
+  await page.getByRole('button', { name: 'Place in Bench' }).click()
+  const note = page.getByTestId('prize-note')
+  await expect(note).toBeVisible({ timeout: 60_000 })
+  await expect(note).toContainText('Fezandipiti ex')
+  await expect(note).toContainText('could never be built')
+})
