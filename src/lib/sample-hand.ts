@@ -6,7 +6,7 @@ import {
   type Condition,
   type Requirement,
 } from './prob/analyze'
-import type { DeckCard } from './types'
+import type { CardRecord, DeckCard } from './types'
 
 /** Whether to look for a hand that meets the condition, or one that misses it. */
 export type SampleMode = 'meets' | 'misses'
@@ -126,6 +126,9 @@ export function sampleHand(
 
 /** TCGdex serves several sizes; `low` is ~15 KB and plenty for a hand view. */
 export function cardImageUrl(card: DeckCard, quality: 'low' | 'high' = 'low'): string | null {
-  const base = card.card?.image
-  return base ? `${base}/${quality}.webp` : null
+  return card.card ? recordImageUrl(card.card, quality) : null
+}
+
+export function recordImageUrl(record: CardRecord, quality: 'low' | 'high' = 'low'): string | null {
+  return record.image ? `${record.image}/${quality}.webp` : null
 }

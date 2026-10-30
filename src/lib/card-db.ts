@@ -41,9 +41,12 @@ for (const printing of db.printings) {
 // built with our own norm(), so no normalisation logic is duplicated in the
 // generator.
 const basicEnergyByName = new Map<string, CardRecord>()
+const basicEnergyByType = new Map<string, CardRecord>()
 for (const energy of db.basicEnergy) {
   const card = cards[energy.index]
-  if (card) basicEnergyByName.set(norm(`${energy.colour} Energy`), card)
+  if (!card) continue
+  basicEnergyByName.set(norm(`${energy.colour} Energy`), card)
+  basicEnergyByType.set(energy.type, card)
 }
 
 const nonStandard = new Set(db.nonStandardNames.map(norm))
@@ -55,6 +58,11 @@ export function findByPrinting(set: string, num: string): CardRecord[] {
 
 export function findBasicEnergyByName(name: string): CardRecord | undefined {
   return basicEnergyByName.get(norm(name))
+}
+
+/** The Basic Energy of a type symbol such as `{G}`, for drawing a goal's Energy. */
+export function findBasicEnergyByType(type: string): CardRecord | undefined {
+  return basicEnergyByType.get(type)
 }
 
 /** Lowest index wins, so resolution is deterministic across reprints. */

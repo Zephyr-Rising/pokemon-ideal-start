@@ -5,7 +5,7 @@ import { buildContext } from './context'
 import { isImplemented } from './effects'
 import { mulberry32, shuffled } from './rng'
 import { searchBestLine } from './search'
-import { cardName, energyType, inPlay, isBasicPokemon, type SimState } from './state'
+import { cardName, inPlay, isBasicPokemon, type SimState } from './state'
 
 export interface PlaytestOptions {
   trials?: number
@@ -87,8 +87,8 @@ export interface ExampleBoard {
 export interface ExampleSlot {
   cardKey: string
   label: string
-  /** Energy type symbols attached. */
-  energy: string[]
+  /** Energy then Tools attached, in the order they went on. */
+  attached: ExampleCard[]
 }
 
 const DEFAULT_TRIALS = 1_500
@@ -315,7 +315,7 @@ function toExampleBoard(state: SimState): ExampleBoard {
   const slot = (entry: SimState['bench'][number]): ExampleSlot => ({
     cardKey: entry.card.key,
     label: entry.card.label,
-    energy: entry.energy.map(energyType),
+    attached: toHand([...entry.energy, ...entry.tools]),
   })
   return {
     active: state.active ? slot(state.active) : null,

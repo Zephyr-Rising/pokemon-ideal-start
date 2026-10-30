@@ -160,3 +160,30 @@ test('shows a different route on request, rewound to its first move', async ({ p
   await expect(scrubber).toHaveValue('0')
   expect(await line.locator('ol li').allInnerTexts()).not.toEqual(first)
 })
+
+test('attaches Energy by tapping, tucked behind the Pokémon', async ({ page }) => {
+  await openBoard(page)
+  await page.getByRole('button', { name: 'Pick Teal Mask Ogerpon ex' }).click()
+  await page.getByRole('button', { name: 'Place in Active spot' }).click()
+
+  // A typed Energy and an "any type" one both attach, and each shows as its
+  // own card behind the Pokémon that can be tapped to take it off again.
+  await page.getByRole('button', { name: 'Pick Grass Energy' }).click()
+  await page.getByRole('button', { name: 'Attach to Teal Mask Ogerpon ex' }).click()
+  await page.getByRole('button', { name: 'Pick Grass Energy' }).click()
+  await page.getByRole('button', { name: 'Attach to Teal Mask Ogerpon ex' }).click()
+  const grass = page.getByRole('button', { name: 'Remove one Grass Energy from Teal Mask Ogerpon ex' })
+  await expect(grass).toHaveCount(2)
+
+  // Only the top edge peeks out from behind the Pokémon, so that is where a
+  // tap has to land.
+  await grass.first().click({ position: { x: 20, y: 4 } })
+  await expect(grass).toHaveCount(1)
+
+  await page.getByRole('button', { name: 'Pick Any Energy' }).click()
+  await page.getByRole('button', { name: 'Attach to Teal Mask Ogerpon ex' }).click()
+  // One Pokémon carries one Energy requirement, so mixing makes it "any".
+  await expect(
+    page.getByRole('button', { name: 'Remove one Any Energy from Teal Mask Ogerpon ex' }),
+  ).toHaveCount(2)
+})

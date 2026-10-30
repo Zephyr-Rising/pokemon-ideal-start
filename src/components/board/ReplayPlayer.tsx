@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { cardImageUrl } from '../../lib/sample-hand'
+import { WithAttached, type AttachedCard } from './Attached'
 import type { ExampleCard, ExampleFrame, ExampleSlot } from '../../lib/sim/playtest'
 import type { DeckCard } from '../../lib/types'
 
@@ -57,23 +58,6 @@ function CardFace({
   )
 }
 
-/** Energy and Tools a Pokémon is carrying, as pips under the card. */
-function Attachments({ slot }: { slot: ExampleSlot }) {
-  if (slot.energy.length === 0) return null
-  return (
-    <div className="mt-0.5 flex flex-wrap justify-center gap-0.5">
-      {slot.energy.map((type, i) => (
-        <span
-          key={`${type}-${i}`}
-          className="animate-deal rounded bg-slate-200 px-1 text-[0.55rem] leading-4 text-slate-700 dark:bg-slate-700 dark:text-slate-200"
-        >
-          {type || '●'}
-        </span>
-      ))}
-    </div>
-  )
-}
-
 export function ReplayPlayer({ frames, cards }: Props) {
   const [at, setAt] = useState(0)
   const [playing, setPlaying] = useState(false)
@@ -85,6 +69,13 @@ export function ReplayPlayer({ frames, cards }: Props) {
       return card ? cardImageUrl(card) : null
     }
   }, [cards])
+
+  const attachedTo = (slot: ExampleSlot): AttachedCard[] =>
+    keyed(slot.attached, (card) => card.cardKey).map(({ item, key }) => ({
+      id: key,
+      label: item.label,
+      src: imageFor(item.cardKey),
+    }))
 
   const last = frames.length - 1
   const position = Math.min(at, last)
@@ -179,12 +170,13 @@ export function ReplayPlayer({ frames, cards }: Props) {
           </p>
           {frame.board.active ? (
             <div className="w-20">
-              <CardFace
-                key={frame.board.active.cardKey}
-                card={frame.board.active}
-                src={imageFor(frame.board.active.cardKey)}
-              />
-              <Attachments slot={frame.board.active} />
+              <WithAttached attached={attachedTo(frame.board.active)} peek={12}>
+                <CardFace
+                  key={frame.board.active.cardKey}
+                  card={frame.board.active}
+                  src={imageFor(frame.board.active.cardKey)}
+                />
+              </WithAttached>
             </div>
           ) : (
             <p className="text-xs text-slate-400">nothing yet</p>
@@ -196,11 +188,12 @@ export function ReplayPlayer({ frames, cards }: Props) {
             Bench ({bench.length})
           </p>
           {bench.length > 0 ? (
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap items-end gap-1.5">
               {bench.map(({ item, key }) => (
                 <div key={key} className="w-14">
-                  <CardFace card={item} src={imageFor(item.cardKey)} />
-                  <Attachments slot={item} />
+                  <WithAttached attached={attachedTo(item)} peek={9}>
+                    <CardFace card={item} src={imageFor(item.cardKey)} />
+                  </WithAttached>
                 </div>
               ))}
             </div>

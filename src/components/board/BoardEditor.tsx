@@ -15,6 +15,7 @@ import {
   dropCard,
   removeBench,
   removeHand,
+  removeTool,
   setBenchMin,
   setSlotEnergy,
   setStadium,
@@ -23,13 +24,46 @@ import {
 import type { DropTarget, DroppedCard } from '../../lib/board/edit'
 import { slotTarget } from '../../lib/board/edit'
 import type { FieldGoal, SlotGoal } from '../../lib/board/goal'
-import { cardImageUrl } from '../../lib/sample-hand'
+import { findBasicEnergyByType } from '../../lib/card-db'
+import { cardImageUrl, recordImageUrl } from '../../lib/sample-hand'
 import type { DeckCard } from '../../lib/types'
+import { WithAttached, type AttachedCard } from './Attached'
 
 interface Props {
   cards: DeckCard[]
   goal: FieldGoal
   onChange: (goal: FieldGoal) => void
+}
+
+/**
+ * "Any Energy": a goal Energy whose type does not matter. It is not a card in
+ * the deck, so it is a stand-in the palette offers alongside the real ones.
+ * Luminous Energy is drawn for it, as the card that famously counts as every
+ * type. It is not in the simulator's card pool, so its art is linked directly.
+ */
+const ANY_ENERGY: DeckCard = {
+  key: 'any-energy',
+  label: 'Any Energy',
+  resolvedName: null,
+  count: 0,
+  card: {
+    index: -1,
+    name: 'Any Energy',
+    kind: 'Energy',
+    rule: '',
+    prev: '',
+    hp: null,
+    // Empty, so a drop asks for Energy of no particular type.
+    type: '',
+    retreat: null,
+    regulationMark: '',
+    effect: '',
+    moves: [],
+    tags: ['energy'],
+    image: 'https://assets.tcgdex.net/en/sv/sv02/191',
+  },
+  printings: [],
+  tags: ['energy'],
 }
 
 const isPokemon = (card: DeckCard) => card.tags.includes('pokemon')
@@ -48,7 +82,45 @@ export function BoardEditor({ cards, goal, onChange }: Props) {
   // Click-to-place: pick a card, then pick a zone. Keeps the board usable on a
   // touch screen and by keyboard, where dragging is not an option.
   const [picked, setPicked] = useState<string | null>(null)
-  const byKey = new Map(cards.map((card) => [card.key, card]))
+  const byKey = new Map([...cards, ANY_ENERGY].map((card) => [card.key, card]))
+
+  /**
+   * The Energy and Tools the goal asks for on one Pokémon, as cards to tuck
+   * behind it. A typed Energy is drawn as this deck's copy when it runs one;
+   * an untyped one is "any", which has no card to show, so it is a label.
+   */
+  const attachedTo = (slot: SlotGoal): AttachedCard[] => {
+    const name = byKey.get(slot.cardKey)?.label ?? 'this Pokémon'
+    const type = slot.energyType
+    const deckEnergy = type
+      ? cards.find((card) => card.tags.includes('basic-energy') && card.card?.type === type)
+      : undefined
+    const record = type
+      ? (deckEnergy?.card ?? findBasicEnergyByType(type))
+      : ANY_ENERGY.card!
+    const energyLabel = deckEnergy?.label ?? record?.name ?? ANY_ENERGY.label
+    const energy = Array.from({ length: slot.energy }, (_, i) => ({
+      id: `energy-${i}`,
+      label: energyLabel,
+      src: record ? recordImageUrl(record) : null,
+      // Luminous Energy's art says "Luminous", so the edge says what it means.
+      badge: type ? undefined : 'Any',
+      removeLabel: `Remove one ${energyLabel} from ${name}`,
+      onRemove: () => onChange(setSlotEnergy(goal, slot.id, slot.energy - 1)),
+    }))
+    const tools = slot.tools.map((key) => {
+      const card = byKey.get(key)
+      const label = card?.label ?? key
+      return {
+        id: `tool-${key}`,
+        label,
+        src: card ? cardImageUrl(card) : null,
+        removeLabel: `Remove ${label} from ${name}`,
+        onRemove: () => onChange(removeTool(goal, slot.id, key)),
+      }
+    })
+    return [...energy, ...tools]
+  }
 
   const place = (target: DropTarget, cardKey: string) => {
     const card = byKey.get(cardKey)
@@ -103,9 +175,8 @@ export function BoardEditor({ cards, goal, onChange }: Props) {
                     <SlotCard
                       slot={goal.active}
                       card={byKey.get(goal.active.cardKey)}
-                      tools={goal.active.tools.map((key) => byKey.get(key)?.label ?? key)}
+                      attached={attachedTo(goal.active)}
                       onRemove={() => onChange(clearActive(goal))}
-                      onEnergy={(n) => onChange(setSlotEnergy(goal, goal.active!.id, n))}
                     />
                   </SlotDrop>
                 ) : (
@@ -134,7 +205,7 @@ export function BoardEditor({ cards, goal, onChange }: Props) {
                 </label>
               </div>
               <Zone id="bench" picked={picked} onPick={place}>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-end gap-2">
                   {goal.bench.map((slot) => (
                     <SlotDrop
                       key={slot.id}
@@ -146,9 +217,8 @@ export function BoardEditor({ cards, goal, onChange }: Props) {
                       <SlotCard
                         slot={slot}
                         card={byKey.get(slot.cardKey)}
-                        tools={slot.tools.map((key) => byKey.get(key)?.label ?? key)}
+                        attached={attachedTo(slot)}
                         onRemove={() => onChange(removeBench(goal, slot.id))}
-                        onEnergy={(n) => onChange(setSlotEnergy(goal, slot.id, n))}
                       />
                     </SlotDrop>
                   ))}
@@ -287,7 +357,17 @@ function SlotDrop({
   return (
     <div
       ref={setNodeRef}
-      onClick={armed ? () => onPlace(target, picked) : undefined}
+      // The zone around this Pokémon is a tap target too. Letting the tap reach
+      // it would apply a second drop built from the board as it was before this
+      // one, silently undoing the attach.
+      onClick={
+        armed
+          ? (event) => {
+              event.stopPropagation()
+              onPlace(target, picked)
+            }
+          : undefined
+      }
       role={armed ? 'button' : undefined}
       aria-label={armed ? `Attach to ${name}` : undefined}
       tabIndex={armed ? 0 : undefined}
@@ -296,6 +376,7 @@ function SlotDrop({
           ? (event) => {
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault()
+                event.stopPropagation()
                 onPlace(target, picked)
               }
             }
@@ -320,72 +401,54 @@ function SlotCard({
   slot,
   card,
   count,
-  tools,
+  attached,
   onRemove,
-  onEnergy,
 }: {
   slot?: SlotGoal
   card: DeckCard | undefined
   count?: number
-  tools?: string[]
+  /** Energy and Tools on a Pokémon in play; absent for other zones. */
+  attached?: AttachedCard[]
   onRemove: () => void
-  onEnergy?: (energy: number) => void
 }) {
   const src = card ? cardImageUrl(card) : null
   const name = card?.label ?? 'Unknown'
 
+  const face = (
+    <div className="relative aspect-[245/342] overflow-hidden rounded-md border border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-800">
+      {src ? (
+        <img src={src} alt={name} loading="lazy" className="h-full w-full object-cover" />
+      ) : (
+        <div className="flex h-full items-center justify-center p-1 text-center text-[10px] leading-tight">
+          {name}
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={`Remove ${name}`}
+        className="absolute top-0.5 right-0.5 h-5 w-5 rounded-full bg-slate-900/70 text-xs leading-none text-white hover:bg-rose-600"
+      >
+        ×
+      </button>
+      {count !== undefined && count > 1 && (
+        <span className="tnum absolute bottom-0.5 left-0.5 rounded bg-slate-900/70 px-1 text-[10px] text-white">
+          ×{count}
+        </span>
+      )}
+    </div>
+  )
+
   return (
     <figure className="w-[84px] space-y-1">
-      <div className="relative aspect-[245/342] overflow-hidden rounded-md border border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-800">
-        {src ? (
-          <img src={src} alt={name} loading="lazy" className="h-full w-full object-cover" />
-        ) : (
-          <div className="flex h-full items-center justify-center p-1 text-center text-[10px] leading-tight">
-            {name}
-          </div>
-        )}
-        <button
-          type="button"
-          onClick={onRemove}
-          aria-label={`Remove ${name}`}
-          className="absolute top-0.5 right-0.5 h-5 w-5 rounded-full bg-slate-900/70 text-xs leading-none text-white hover:bg-rose-600"
-        >
-          ×
-        </button>
-        {count !== undefined && count > 1 && (
-          <span className="tnum absolute bottom-0.5 left-0.5 rounded bg-slate-900/70 px-1 text-[10px] text-white">
-            ×{count}
-          </span>
-        )}
-      </div>
-      {onEnergy && slot && (
-        <label className="flex items-center justify-center gap-1 text-[10px] text-slate-500">
-          <span className="sr-only">Energy on {name}</span>
-          <button
-            type="button"
-            onClick={() => onEnergy(slot.energy - 1)}
-            aria-label={`One fewer Energy on ${name}`}
-            className="h-4 w-4 rounded border border-slate-300 leading-none dark:border-slate-700"
-          >
-            −
-          </button>
-          <span className="tnum w-8 text-center">{slot.energy}⚡</span>
-          <button
-            type="button"
-            onClick={() => onEnergy(slot.energy + 1)}
-            aria-label={`One more Energy on ${name}`}
-            className="h-4 w-4 rounded border border-slate-300 leading-none dark:border-slate-700"
-          >
-            +
-          </button>
-        </label>
+      {slot ? (
+        <WithAttached attached={attached ?? []} peek={14}>
+          {face}
+        </WithAttached>
+      ) : (
+        face
       )}
-      {tools && tools.length > 0 && (
-        <p className="truncate text-center text-[9px] text-sky-700 dark:text-sky-400" title={tools.join(', ')}>
-          + {tools.join(', ')}
-        </p>
-      )}
-      {!onEnergy && <figcaption className="truncate text-center text-[10px]">{name}</figcaption>}
+      {!slot && <figcaption className="truncate text-center text-[10px]">{name}</figcaption>}
     </figure>
   )
 }
@@ -409,7 +472,7 @@ function Palette({
         Your deck {picked && <span className="text-sky-600">— now pick a spot</span>}
       </h3>
       <div className="flex flex-wrap gap-1.5" data-testid="card-palette">
-        {placeable.map((card) => (
+        {[...placeable, ANY_ENERGY].map((card) => (
           <PaletteCard
             key={card.key}
             card={card}
@@ -444,7 +507,7 @@ function PaletteCard({
       {...attributes}
       aria-label={`Pick ${card.label}`}
       aria-pressed={picked}
-      title={`${card.count}× ${card.label}`}
+      title={card.count > 0 ? `${card.count}× ${card.label}` : card.label}
       className={[
         'relative w-[64px] shrink-0 overflow-hidden rounded-md border-2 transition',
         isDragging ? 'opacity-40' : '',
@@ -471,9 +534,15 @@ function PaletteCard({
           </span>
         )}
       </span>
-      <span className="tnum absolute bottom-0 left-0 rounded-tr bg-slate-900/75 px-1 text-[10px] text-white">
-        ×{card.count}
-      </span>
+      {card.count > 0 ? (
+        <span className="tnum absolute bottom-0 left-0 rounded-tr bg-slate-900/75 px-1 text-[10px] text-white">
+          ×{card.count}
+        </span>
+      ) : (
+        <span className="absolute inset-x-0 bottom-0 bg-slate-900/75 text-center text-[10px] font-semibold text-white">
+          Any type
+        </span>
+      )}
     </button>
   )
 }
