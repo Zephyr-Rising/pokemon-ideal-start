@@ -341,7 +341,7 @@ function TurnExamples({ examples, cards }: { examples: TurnsExample[]; cards: De
       <h3 className="text-sm font-semibold">How games get there</h3>
       <p className="mt-0.5 mb-3 text-xs text-slate-500">
         Real games from this run, fastest first: one for every turn a game built the board on, from
-        each turn order.
+        each turn order, and one that never got there, to show what held it back.
       </p>
 
       <div className="mb-3 flex flex-wrap gap-1.5" role="group" aria-label="Example games">
@@ -358,7 +358,8 @@ function TurnExamples({ examples, cards }: { examples: TurnsExample[]; cards: De
                 : 'border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800',
             ].join(' ')}
           >
-            Turn {option.turn} · {option.goingFirst ? 'going first' : 'going second'}
+            {option.turn === null ? 'Later' : `Turn ${option.turn}`} ·{' '}
+            {option.goingFirst ? 'going first' : 'going second'}
           </button>
         ))}
       </div>
@@ -369,6 +370,9 @@ function TurnExamples({ examples, cards }: { examples: TurnsExample[]; cards: De
             <h4 className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
               Turn {turn.turn}
               {turn.turn === example.turn && ' · board complete'}
+              {example.turn === null &&
+                turn.turn === example.turns[example.turns.length - 1].turn &&
+                ` · not built by turn ${MAX_TURNS}`}
             </h4>
             <ol className="mt-1 space-y-1 text-sm">
               {turn.steps.map((step, position) => (

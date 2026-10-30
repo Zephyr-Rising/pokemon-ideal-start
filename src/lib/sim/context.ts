@@ -28,6 +28,11 @@ export function buildContext(
   const relevant = new Set<string>()
   if (goal.active) relevant.add(goal.active.cardKey)
   for (const slot of goal.bench) relevant.add(slot.cardKey)
+  // The Tools the goal puts on its Pokémon: without these a Tool could never
+  // be attached or fetched, and any board with one could never be built.
+  for (const slot of [...(goal.active ? [goal.active] : []), ...goal.bench]) {
+    for (const toolKey of slot.tools) relevant.add(toolKey)
+  }
   if (goal.stadiumKey) relevant.add(goal.stadiumKey)
   for (const want of goal.inHand) relevant.add(want.cardKey)
 

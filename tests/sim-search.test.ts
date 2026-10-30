@@ -277,3 +277,25 @@ describe('the turn\'s Energy attachment', () => {
     expect(result.line).toEqual([])
   })
 })
+
+describe('Tools on the board', () => {
+  it('attaches a Tool the board asks for', () => {
+    const belt = tool('belt')
+    const s = state({ active: inPlay(basic('dreepy')), hand: [belt] })
+    const result = run(s, goal({ active: { ...slot('a', 'dreepy'), tools: ['belt'] } }))
+    expect(result.score.strict).toBe(true)
+    expect(result.line.map((a) => a.kind)).toEqual(['attachTool'])
+  })
+
+  it('fetches one with a search card', () => {
+    const belt = tool('belt')
+    const pad = card('secret-box', ['item'], { name: 'Secret Box' })
+    const s = state({
+      active: inPlay(basic('dreepy')),
+      hand: [pad, basic('x'), basic('y'), basic('z')],
+      deck: [belt, basic('filler')],
+    })
+    const result = run(s, goal({ active: { ...slot('a', 'dreepy'), tools: ['belt'] } }))
+    expect(result.score.strict).toBe(true)
+  })
+})

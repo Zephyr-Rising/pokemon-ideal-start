@@ -263,3 +263,18 @@ test('says how often the prizes make the board impossible', async ({ page }) => 
   await expect(note).toContainText('Fezandipiti ex')
   await expect(note).toContainText('could never be built')
 })
+
+test('builds a board with a Tool on it', async ({ page }) => {
+  await stubCardArt(page)
+  await page.goto('./')
+  await page.getByRole('textbox').first().fill(readFileSync('tests/fixtures/festival-lead.txt', 'utf8'))
+  await page.getByRole('tab', { name: 'Turn 1 board' }).click()
+  await page.getByRole('button', { name: 'Pick Grookey' }).click()
+  await page.getByRole('button', { name: 'Place in Active spot' }).click()
+  await page.getByRole('button', { name: 'Pick Air Balloon' }).click()
+  await page.getByRole('button', { name: 'Attach to Grookey' }).click()
+
+  // The Tool is part of the board, and some games build it.
+  await expect(page.getByText('Air Balloon on the Active').first()).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByTestId('playtest-probability')).not.toHaveText('0.0%')
+})

@@ -104,10 +104,15 @@ describe('example games', () => {
   const g = goal({ active: slot('a', keyOf(cards, 'Drakloak')) })
   const result = turnsTest(cards, g, labelFor(cards), { trials: 60, seed: 4 })
 
-  it('lists them fastest first', () => {
-    const turns = result.examples.map((e) => e.turn)
+  it('lists them fastest first, with a game that never got there last', () => {
+    const turns = result.examples.map((e) => e.turn ?? Infinity)
     expect(turns).toEqual([...turns].sort((a, b) => a - b))
     expect(result.examples.length).toBeGreaterThan(0)
+    // At most one such game. (Prize-locked games are never played, so a run
+    // whose only misses are prize-locked has none to show.)
+    const later = result.examples.filter((e) => e.turn === null)
+    expect(later.length).toBeLessThanOrEqual(1)
+    if (result.reached === 1) expect(later).toHaveLength(0)
   })
 
   it('has one for every turn, and order, that some game built the board on', () => {
@@ -124,6 +129,7 @@ describe('example games', () => {
 
   it('plays each one turn by turn up to the turn it got there', () => {
     for (const example of result.examples) {
+      if (example.turn === null) continue
       expect(example.turns.map((t) => t.turn)).toEqual(
         Array.from({ length: example.turn }, (_, i) => i + 1),
       )
@@ -154,5 +160,21 @@ describe('luck', () => {
       const total = factor.buckets.reduce((sum, b) => sum + b.share, 0)
       expect(total).toBeCloseTo(1, 10)
     }
+  })
+}, 120_000)
+
+describe('the game that never got there', () => {
+  const cards = load('dragapult-munkidori')
+  // Hard enough that some games miss by turn 6.
+  const g = goal({ active: slot('a', keyOf(cards, 'Dragapult ex')), bench: [slot('b', keyOf(cards, 'Fezandipiti ex'))] })
+  const result = turnsTest(cards, g, labelFor(cards), { trials: 40, seed: 2 })
+
+  it('is shown, played through every turn it had', () => {
+    const later = result.examples.find((e) => e.turn === null)
+    expect(result.reached).toBeLessThan(1)
+    expect(later).toBeDefined()
+    const turns = later!.turns.map((t) => t.turn)
+    expect(turns[0]).toBe(1)
+    expect(turns).toEqual(Array.from({ length: turns.length }, (_, i) => i + 1))
   })
 }, 120_000)

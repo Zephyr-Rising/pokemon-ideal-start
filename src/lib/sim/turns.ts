@@ -72,10 +72,13 @@ export interface TurnsExampleTurn {
   frames: ExampleFrame[]
 }
 
-/** One game played out turn by turn, to the turn it built the board. */
+/**
+ * One game played out turn by turn: to the turn it built the board, or — for
+ * the one "later" game kept for diagnosis — through every turn it played.
+ */
 export interface TurnsExample {
-  /** The turn the board came together. */
-  turn: number
+  /** The turn the board came together, or null for a game that never did. */
+  turn: number | null
   goingFirst: boolean
   turns: TurnsExampleTurn[]
 }
@@ -112,7 +115,8 @@ export interface TurnsResult extends TurnsOrderDetail {
   turnsTruncated: number
   /**
    * Example games, fastest first: one for every turn some game built the board
-   * on, from each turn order where both managed it.
+   * on, from each turn order where both managed it, then one game that never
+   * did (turn null), when there was one.
    */
   examples: TurnsExample[]
 }
@@ -304,7 +308,7 @@ function toTurnsExample(game: GameOutcome, goingFirst: boolean): TurnsExample {
     // The deal itself is a frame with no step of its own.
     return { turn: step.turn, steps: all.slice(step.opening ? 1 : 0).map((f) => f.step), frames: all }
   })
-  return { turn: game.turn!, goingFirst, turns }
+  return { turn: game.turn, goingFirst, turns }
 }
 
 interface GameOutcome {
@@ -456,8 +460,8 @@ export function turnsTest(
       [asFirst, true],
       [asSecond, false],
     ] as const) {
-      if (game.turn === null) continue
-      const key = `${game.turn}|${goingFirst}`
+      // And one game that never got there, to show what held it back.
+      const key = game.turn === null ? 'later' : `${game.turn}|${goingFirst}`
       if (!examples.has(key)) examples.set(key, toTurnsExample(game, goingFirst))
     }
     if (asFirst.hitBudget || asSecond.hitBudget) truncated++
@@ -493,9 +497,11 @@ export function turnsTest(
     truncated,
     turnsPlayed,
     turnsTruncated,
-    // Fastest first; going first before going second within a turn.
+    // Fastest first, going first before going second within a turn, and the
+    // game that never got there last.
     examples: [...examples.values()].sort(
-      (a, b) => a.turn - b.turn || Number(b.goingFirst) - Number(a.goingFirst),
+      (a, b) =>
+        (a.turn ?? Infinity) - (b.turn ?? Infinity) || Number(b.goingFirst) - Number(a.goingFirst),
     ),
   }
 }
