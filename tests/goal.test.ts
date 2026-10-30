@@ -240,3 +240,24 @@ describe('mixed Energy needs', () => {
     expect(met(['{G}'])).toBe(false)
   })
 })
+
+describe('part labels', () => {
+  it('tells repeated Pokémon apart, so no two parts read the same', () => {
+    const g = goal({
+      active: slot('a', 'dreepy', 1, null, ['belt']),
+      bench: [
+        slot('b1', 'dreepy', 1, '{P}', ['belt']),
+        slot('b2', 'dreepy', 1, '{P}'),
+        slot('b3', 'budew'),
+      ],
+    })
+    const empty: BoardView = { active: null, bench: [], stadiumKey: null, hand: [] }
+    const labels = scoreBoard(g, empty, (k) => k).parts.map((p) => p.label)
+    expect(new Set(labels).size).toBe(labels.length)
+    expect(labels).toContain('dreepy #1 benched')
+    expect(labels).toContain('Psychic Energy on dreepy #2')
+    expect(labels).toContain('belt on the Active')
+    // A card benched once keeps its plain name.
+    expect(labels).toContain('budew benched')
+  })
+})

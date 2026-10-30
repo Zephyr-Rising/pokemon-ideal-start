@@ -189,6 +189,29 @@ export function energyPhrase(slot: Pick<SlotGoal, 'energy'>): string {
  * `labelFor` turns a card key into a display name; it is passed in so this
  * module stays independent of the deck model.
  */
+/**
+ * What to call each benched Pokémon in a part's label. Two of the same card
+ * would otherwise give two parts that read identically ("Dreepy benched"
+ * twice), so repeats are numbered in the order they were placed: "Dreepy #1",
+ * "Dreepy #2". A card benched once keeps its plain name.
+ */
+function benchNames(
+  bench: SlotGoal[],
+  labelFor: (cardKey: string) => string,
+): Map<string, string> {
+  const total = new Map<string, number>()
+  for (const slot of bench) total.set(slot.cardKey, (total.get(slot.cardKey) ?? 0) + 1)
+  const seen = new Map<string, number>()
+  const names = new Map<string, string>()
+  for (const slot of bench) {
+    const nth = (seen.get(slot.cardKey) ?? 0) + 1
+    seen.set(slot.cardKey, nth)
+    const label = labelFor(slot.cardKey)
+    names.set(slot.id, total.get(slot.cardKey)! > 1 ? `${label} #${nth}` : label)
+  }
+  return names
+}
+
 export function scoreBoard(
   goal: FieldGoal,
   board: BoardView,
@@ -217,26 +240,29 @@ export function scoreBoard(
       parts.push({
         id: `${goal.active.id}:tool:${toolKey}`,
         kind: 'activeTool',
-        label: `${labelFor(toolKey)} on ${labelFor(goal.active.cardKey)}`,
+        // "the Active", so it cannot read the same as a Tool on a benched copy.
+        label: `${labelFor(toolKey)} on the Active`,
         met: matches && toolMet(board.active ?? undefined, toolKey),
       })
     }
   }
 
   const paired = pairBench(goal.bench, board.bench)
+  const benchName = benchNames(goal.bench, labelFor)
   for (const slot of goal.bench) {
     const pokemon = paired.get(slot.id)
+    const name = benchName.get(slot.id)!
     parts.push({
       id: `${slot.id}:card`,
       kind: 'bench',
-      label: `${labelFor(slot.cardKey)} benched`,
+      label: `${name} benched`,
       met: pokemon !== undefined,
     })
     if (slot.energy.length > 0) {
       parts.push({
         id: `${slot.id}:energy`,
         kind: 'benchEnergy',
-        label: `${energyPhrase(slot)} on ${labelFor(slot.cardKey)}`,
+        label: `${energyPhrase(slot)} on ${name}`,
         met: energyMet(pokemon, slot),
       })
     }
@@ -244,7 +270,7 @@ export function scoreBoard(
       parts.push({
         id: `${slot.id}:tool:${toolKey}`,
         kind: 'benchTool',
-        label: `${labelFor(toolKey)} on ${labelFor(slot.cardKey)}`,
+        label: `${labelFor(toolKey)} on ${name}`,
         met: toolMet(pokemon, toolKey),
       })
     }
