@@ -133,20 +133,49 @@ const toolMet = (pokemon: BoardPokemon | undefined, toolKey: string): boolean =>
   pokemon !== undefined && pokemon.tools.includes(toolKey)
 
 /** Does this Pokémon carry the Energy a slot asks for? */
+/**
+ * How a Special Energy reads on the board: its card key, then the types it
+ * provides on the Pokémon it is attached to (`*` for every type). A Basic
+ * Energy is just its type.
+ */
+export const specialEnergyEntry = (cardKey: string, provides: string[]): string =>
+  `${cardKey}#${provides.join(',')}`
+
+function parseEntry(entry: string): { key: string; basic: boolean; provides: string[] } {
+  const at = entry.indexOf('#')
+  if (at < 0) return { key: entry, basic: true, provides: [entry] }
+  return { key: entry.slice(0, at), basic: false, provides: entry.slice(at + 1).split(',') }
+}
+
+/** Does this attached Energy meet a typed need (`{P}`) or a specific card's? */
+function entryMeets(entry: string, need: string): boolean {
+  const { key, basic, provides } = parseEntry(entry)
+  if (!need.startsWith('{')) return !basic && key === need
+  return provides.includes(need) || provides.includes('*')
+}
+
 function energyMet(pokemon: BoardPokemon | undefined, slot: SlotGoal): boolean {
   if (slot.energy.length === 0) return true
   if (!pokemon) return false
-  // Typed needs claim a matching Energy each; whatever is left over can stand
-  // in for the "any" ones. Taking typed needs first is always safe, since an
-  // "any" need is happy with whatever they leave.
   const spare = [...pokemon.energy]
-  for (const type of slot.energy) {
-    if (type === null) continue
-    const at = spare.indexOf(type)
+  const claim = (need: string, ok: (entry: string) => boolean): boolean => {
+    const at = spare.findIndex((entry) => ok(entry) && entryMeets(entry, need))
     if (at < 0) return false
     spare.splice(at, 1)
+    return true
   }
-  return spare.length >= slot.energy.filter((type) => type === null).length
+  const needs = slot.energy.filter((kind): kind is string => kind !== null)
+  // Most specific first, so nothing a later need depends on is used up: a
+  // named Special Energy; then each type, from a Basic Energy of it if there
+  // is one, else from a Special Energy that provides it (Telepathic Psychic
+  // Energy for Psychic). Whatever is left stands in for the "any" needs.
+  for (const need of needs.filter((kind) => !kind.startsWith('{'))) {
+    if (!claim(need, () => true)) return false
+  }
+  for (const need of needs.filter((kind) => kind.startsWith('{'))) {
+    if (!claim(need, (entry) => parseEntry(entry).basic) && !claim(need, () => true)) return false
+  }
+  return spare.length >= slot.energy.filter((kind) => kind === null).length
 }
 
 /**

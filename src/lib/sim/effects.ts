@@ -8,7 +8,7 @@ import {
   cardName,
   nameOf,
   cloneState,
-  energyKind,
+  energyFits,
   energyType,
   evolveSlot,
   fairShuffle,
@@ -577,7 +577,9 @@ export function attachFrom(
   const pool = state[source]
   const candidates = pool.filter((card) => isBasicEnergy(card) && energyOk(card))
   if (candidates.length === 0) return []
-  const energy = candidates.find((card) => ctx.energyTypes.has(energyKind(card))) ?? candidates[0]
+  const energy =
+    (ctx.energyTypes.size > 0 && candidates.find((card) => energyFits(card, ctx.energyTypes))) ||
+    candidates[0]
 
   const wants = ctx.energyLineage ?? ctx.energyTargets
   const counts = (slot: InPlay) =>

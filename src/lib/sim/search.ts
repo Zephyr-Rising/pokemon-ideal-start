@@ -6,7 +6,7 @@ import { abilityOf, engineKeeps } from './abilities'
 import {
   ACTIVE_TARGET,
   allInPlay,
-  energyKind,
+  energyFits,
   signature,
   toBoardView,
   type InPlay,
@@ -141,7 +141,8 @@ function closingAttachment(
   if (choices.length === 0) return null
   // A type the goal asks for, when it asks for one.
   const energy =
-    choices.find(({ card }) => ctx.energyTypes.has(energyKind(card))) ?? choices[0]
+    (ctx.energyTypes.size > 0 && choices.find(({ card }) => energyFits(card, ctx.energyTypes))) ||
+    choices[0]
 
   const worth = (slot: InPlay): number => {
     const key = slot.card.key

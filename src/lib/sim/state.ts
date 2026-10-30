@@ -1,4 +1,4 @@
-import type { BoardView } from '../board/goal'
+import { specialEnergyEntry, type BoardView } from '../board/goal'
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
 import { hashString, mulberry32, shuffled } from './rng'
@@ -138,6 +138,50 @@ export const energyType = (card: DeckCard): string => card.card?.type ?? ''
 export const energyKind = (card: DeckCard): string =>
   card.tags.includes('basic-energy') ? energyType(card) : card.key
 
+/**
+ * The types an Energy card provides: a Basic Energy its own; a Special Energy
+ * what its text says — "provides {P} Energy" (Telepathic Psychic Energy),
+ * "{P} or {D}" (Team Rocket's Energy), or every type (`*`: Legacy Energy, and
+ * Prism and Neo Upper Energy on the Pokémon they need). Anything else gives
+ * only {C}, which meets an "any type" need but no typed one.
+ *
+ * `holder` is the Pokémon it is attached to, when known, for the conditions.
+ */
+export function energyProvides(card: DeckCard, holder?: DeckCard): string[] {
+  if (card.tags.includes('basic-energy')) return [energyType(card)]
+  const text = card.card?.effect ?? ''
+  if (/every type of Energy/i.test(text)) {
+    const needsBasic = /attached to a Basic Pok/i.test(text)
+    const needsStage2 = /attached to a Stage 2/i.test(text)
+    const holds =
+      !holder ||
+      (needsBasic ? isBasicPokemon(holder) : true) &&
+        (needsStage2 ? holder.tags.includes('stage2') : true)
+    if (holds) return ['*']
+  }
+  const sentence = text.split('.').find((part) => /provides/i.test(part)) ?? ''
+  const types = [...new Set(sentence.match(/\{[A-Z]\}/g) ?? [])].filter((type) => type !== '{C}')
+  if (types.length > 0) return types
+  const printed = card.card?.type ?? ''
+  return printed && printed !== '{C}' ? [printed] : ['{C}']
+}
+
+/** How an attached Energy reads on the board; see `specialEnergyEntry`. */
+export const energyEntry = (card: DeckCard, holder: DeckCard): string =>
+  card.tags.includes('basic-energy')
+    ? energyType(card)
+    : specialEnergyEntry(card.key, energyProvides(card, holder))
+
+/**
+ * Is this Energy what a goal asks for — its type (a Basic Energy, or a
+ * Special Energy that provides it) or, for a named Special Energy, that card?
+ * An empty set of types means any type will do.
+ */
+export function energyFits(card: DeckCard, kinds: Set<string>, holder?: DeckCard): boolean {
+  if (kinds.size === 0 || kinds.has(energyKind(card))) return true
+  return energyProvides(card, holder).some((type) => type === '*' || kinds.has(type))
+}
+
 const SKYLINER = norm('Latias ex')
 
 /**
@@ -164,13 +208,13 @@ export const toBoardView = (state: SimState): BoardView => ({
   active: state.active
     ? {
         cardKey: state.active.card.key,
-        energy: state.active.energy.map(energyKind),
+        energy: state.active.energy.map((energy) => energyEntry(energy, state.active!.card)),
         tools: state.active.tools.map((tool) => tool.key),
       }
     : null,
   bench: state.bench.map((slot) => ({
     cardKey: slot.card.key,
-    energy: slot.energy.map(energyKind),
+    energy: slot.energy.map((energy) => energyEntry(energy, slot.card)),
     tools: slot.tools.map((tool) => tool.key),
   })),
   stadiumKey: state.stadium?.key ?? null,

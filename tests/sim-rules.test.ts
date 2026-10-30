@@ -5,6 +5,8 @@ import {
   BASE_BENCH,
   benchCap,
   cloneState,
+  energyFits,
+  energyProvides,
   energyKind,
   fairShuffle,
   inPlay,
@@ -481,5 +483,30 @@ describe('energyKind', () => {
     const mist = card('mist', ['energy', 'special-energy'], { type: '' })
     expect(energyKind(grass)).toBe('{G}')
     expect(energyKind(mist)).toBe('mist')
+  })
+})
+
+describe('what an Energy provides', () => {
+  const special = (key: string, effect: string) =>
+    card(key, ['energy', 'special-energy'], { name: key, type: '', effect })
+  const telepathic = special('telepathic', 'As long as this card is attached to a Pokémon, it provides {P} Energy.')
+  const rocket = special('rocket', "This card can only be attached to a Team Rocket's Pokémon. This card provides 2 in any combination of {P} Energy and {D} Energy.")
+  const prism = special('prism', 'As long as this card is attached to a Pokémon, it provides {C} Energy. If this card is attached to a Basic Pokémon, it provides every type of Energy but provides only 1 Energy at a time.')
+  const mist = special('mist', 'As long as this card is attached to a Pokémon, it provides {C} Energy.')
+
+  it('reads the type from the card text', () => {
+    expect(energyProvides(telepathic)).toEqual(['{P}'])
+    expect(energyProvides(rocket)).toEqual(['{P}', '{D}'])
+    expect(energyProvides(mist)).toEqual(['{C}'])
+  })
+
+  it('honours conditions on the Pokémon it is attached to', () => {
+    expect(energyProvides(prism, basic('dreepy'))).toEqual(['*'])
+    expect(energyProvides(prism, card('drakloak', ['pokemon', 'stage1']))).toEqual(['{C}'])
+  })
+
+  it('lets a Special Energy that provides the type stand in for a typed need', () => {
+    expect(energyFits(telepathic, new Set(['{P}']))).toBe(true)
+    expect(energyFits(mist, new Set(['{P}']))).toBe(false)
   })
 })

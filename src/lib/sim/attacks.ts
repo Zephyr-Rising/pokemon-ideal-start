@@ -3,7 +3,7 @@ import type { DeckCard } from '../types'
 import type { EffectContext } from './effects'
 import {
   cloneState,
-  energyKind,
+  energyProvides,
   fairShuffle,
   isBasicPokemon,
   isStadium,
@@ -57,9 +57,10 @@ export function attackAvailable(state: SimState): boolean {
  */
 export function costPaid(cost: string, slot: InPlay): boolean {
   const symbols = cost.match(/\{[A-Z]\}/g) ?? []
-  const pool = slot.energy.map(energyKind)
+  // What each attached Energy provides on this Pokémon.
+  const pool = slot.energy.map((energy) => energyProvides(energy, slot.card))
   for (const symbol of symbols.filter((s) => s !== '{C}')) {
-    const at = pool.indexOf(symbol)
+    const at = pool.findIndex((types) => types.includes(symbol) || types.includes('*'))
     if (at < 0) return false
     pool.splice(at, 1)
   }

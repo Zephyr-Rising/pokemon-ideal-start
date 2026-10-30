@@ -1,7 +1,7 @@
 import type { FieldGoal, Priority } from '../board/goal'
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
-import { energyKind, nameOf } from './state'
+import { energyFits, nameOf } from './state'
 
 /**
  * Is the board impossible before a card is played, because something it needs
@@ -90,7 +90,8 @@ export function boardRequirements(
       const special = byKey.get(kind)
       need(`energy:${kind}`, () => ({
         label: special ? special.label : `${ENERGY_NAMES[kind] ?? kind} Energy`,
-        matches: (card) => card.tags.includes('energy') && energyKind(card) === kind,
+        // A Special Energy that provides the type counts too.
+        matches: (card) => card.tags.includes('energy') && energyFits(card, new Set([kind])),
       }))
     }
   }

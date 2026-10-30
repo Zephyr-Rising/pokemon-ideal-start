@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   energyPhrase,
+  specialEnergyEntry,
   emptyGoal,
   goalIsEmpty,
   scoreBoard,
@@ -267,13 +268,32 @@ describe('Special Energy', () => {
   const mist = 'id:mist'
   const labels = (key: string) => (key === mist ? 'Mist Energy' : key)
   const g = goal({ active: { id: 'a', cardKey: 'dreepy', energy: [mist], tools: [] } })
-  const met = (energy: string[]) =>
-    scoreBoard(g, { active: { cardKey: 'dreepy', energy, tools: [] }, bench: [], stadiumKey: null, hand: [] }, labels)
+  const met = (energy: string[], goal = g) =>
+    scoreBoard(goal, { active: { cardKey: 'dreepy', energy, tools: [] }, bench: [], stadiumKey: null, hand: [] }, labels)
       .parts.find((p) => p.id.endsWith(':energy'))!.met
+  // Attached Special Energy reads as its card and the types it provides.
+  const attachedMist = specialEnergyEntry(mist, ['{C}'])
+  const telepathic = specialEnergyEntry('id:telepathic', ['{P}'])
+  const prism = specialEnergyEntry('id:prism', ['*'])
 
   it('is met only by that card', () => {
-    expect(met([mist])).toBe(true)
+    expect(met([attachedMist])).toBe(true)
     expect(met(['{P}'])).toBe(false)
+  })
+
+  it('meets a typed need when it provides that type', () => {
+    const psychic = goal({ active: { id: 'a', cardKey: 'dreepy', energy: ['{P}'], tools: [] } })
+    expect(met([telepathic], psychic)).toBe(true)
+    expect(met([prism], psychic)).toBe(true)
+    // Mist Energy only provides Colorless.
+    expect(met([attachedMist], psychic)).toBe(false)
+  })
+
+  it('leaves a Basic Energy of the type for the need, and the Special for "any"', () => {
+    const both = goal({ active: { id: 'a', cardKey: 'dreepy', energy: ['{P}', null], tools: [] } })
+    expect(met(['{P}', telepathic], both)).toBe(true)
+    expect(met([telepathic, attachedMist], both)).toBe(true)
+    expect(met([attachedMist, attachedMist], both)).toBe(false)
   })
 
   it('is named after the card', () => {
@@ -288,7 +308,7 @@ describe('Special Energy', () => {
     const anyGoal = goal({ active: { id: 'a', cardKey: 'dreepy', energy: [null], tools: [] } })
     const score = scoreBoard(
       anyGoal,
-      { active: { cardKey: 'dreepy', energy: [mist], tools: [] }, bench: [], stadiumKey: null, hand: [] },
+      { active: { cardKey: 'dreepy', energy: [attachedMist], tools: [] }, bench: [], stadiumKey: null, hand: [] },
       labels,
     )
     expect(score.strict).toBe(true)

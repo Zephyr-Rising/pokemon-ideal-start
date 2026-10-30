@@ -16,7 +16,7 @@ import {
   benchCap,
   nameOf,
   cloneState,
-  energyKind,
+  energyFits,
   energyType,
   evolveSlot,
   inPlay,
@@ -221,7 +221,7 @@ export function legalActions(state: SimState, ctx: ActionContext): Action[] {
     state.hand.forEach((card, handIndex) => {
       if (!isEnergy(card) || seenEnergy.has(card.key)) return
       seenEnergy.add(card.key)
-      const rightType = ctx.energyTypes.size === 0 || ctx.energyTypes.has(energyKind(card))
+      const rightType = energyFits(card, ctx.energyTypes)
       // Two benched Pokémon that are the same card carrying the same Energy
       // give the same board either way, so only one is tried.
       const seenSlot = new Set<string>()
