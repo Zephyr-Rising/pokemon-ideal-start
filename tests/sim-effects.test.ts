@@ -612,3 +612,39 @@ describe('discard costs with an accelerator ready', () => {
     expect(after.discard.filter((c) => c.tags.includes('energy'))).toHaveLength(2)
   })
 })
+
+describe('Secret Box', () => {
+  const item = (name: string, extra: string[] = []) => card(name.toLowerCase().replace(/\W+/g, '-'), ['item', ...extra], { name })
+  const deck = () => [
+    item('Ultra Ball', ['poke-search']),
+    item('Switch'),
+    card('lillie', ['supporter', 'draw', 'hand-refresh'], { name: "Lillie's Determination" }),
+    trainer("Boss's Orders", 'supporter'),
+    card('forest', ['stadium'], { name: 'Forest of Vitality' }),
+    card('balloon', ['tool'], { name: 'Air Balloon' }),
+    basic('filler'),
+  ]
+  const hand = () => [basic('a'), basic('b'), basic('c')]
+  const none = ctx({ relevant: new Set(), wantsAnyBench: false, wantsEnergy: false })
+
+  it('takes the most useful card of each kind the simulator can play, then shuffles', () => {
+    const [after] = play('Secret Box', state({ hand: hand(), deck: deck() }), none)
+    // A search over Switch; a draw Supporter, never Boss's Orders. No Tool or
+    // Stadium: nothing here needs Air Balloon or Forest of Vitality.
+    expect(keys(after.hand).sort()).toEqual(['lillie', 'ultra-ball'])
+    expect(after.discard).toHaveLength(3)
+    expect(after.shuffles).toBe(1)
+  })
+
+  it('takes the cards the goal names first, and helpful ones when they help', () => {
+    const c = ctx({
+      relevant: new Set(['switch']),
+      wantsAnyBench: false,
+      wantsEnergy: false,
+      activeKey: 'somebody',
+      wantsGrassEvolution: true,
+    })
+    const [after] = play('Secret Box', state({ hand: hand(), deck: deck() }), c)
+    expect(keys(after.hand).sort()).toEqual(['balloon', 'forest', 'lillie', 'switch'])
+  })
+})

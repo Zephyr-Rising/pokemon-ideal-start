@@ -478,24 +478,80 @@ registerEffect('Hilda', (state, ctx) => {
   return [next]
 })
 
+// "You can use this card only if you discard 3 other cards from your hand.
+// Search your deck for an Item card, a Pokémon Tool card, a Supporter card,
+// and a Stadium card, reveal them, and put them into your hand. Then, shuffle
+// your deck."
+//
+// One of each, chosen the way a player would rather than branched on: a card
+// the goal names first, otherwise the most useful card of that kind the
+// simulator can play (see `secretBoxWorth`). Limiting it to cards the goal
+// named meant it was almost never played.
 registerEffect('Secret Box', (state, ctx) => {
   const paid = payDiscard(state, 3, ctx)
   if (!paid) return [state]
-  const pick = (allowed: (c: DeckCard) => boolean) => choices(paid, paid.deck, allowed, ctx)[0]
-  const wanted = [
-    pick((c) => c.tags.includes('item')),
-    pick((c) => c.tags.includes('tool')),
-    pick((c) => c.tags.includes('supporter')),
-    pick((c) => c.tags.includes('stadium')),
-  ].filter((c): c is DeckCard => c !== undefined)
+  const best = (kind: string) =>
+    distinctCards(paid.deck.filter((card) => card.tags.includes(kind)))
+      .map((card) => ({ card, worth: secretBoxWorth(card, kind, paid, ctx) }))
+      .filter((entry) => entry.worth > 0)
+      .sort((a, b) => b.worth - a.worth)[0]?.card
+  const wanted = ['item', 'tool', 'supporter', 'stadium']
+    .map(best)
+    .filter((card): card is DeckCard => card !== undefined)
   if (wanted.length === 0) return [state]
   const next = cloneState(paid)
   for (const card of wanted) {
     removeFirst(next.deck, card)
     next.hand.push(card)
   }
+  next.deck = fairShuffle(paid, next.deck, ctx.seed)
+  next.shuffles = shufflesAfter(paid)
   return [next]
 })
+
+/**
+ * How much Secret Box should want this card, of this kind; 0 to leave it.
+ *
+ *  - Item: one the goal names; Rare Candy when the goal has a Stage 2 to
+ *    build; a search (Ultra Ball, Poké Pad, Buddy-Buddy Poffin…); any other
+ *    Item the simulator can play.
+ *  - Tool: one the goal names; Air Balloon when the goal names an Active, as
+ *    it frees the retreat into it.
+ *  - Supporter: one the goal names; else a playable one — a draw first — as
+ *    long as a Supporter can still be played (this turn, or the next).
+ *  - Stadium: one the goal names; Forest of Vitality for a Grass evolution;
+ *    Area Zero Underdepths for a big bench.
+ */
+function secretBoxWorth(card: DeckCard, kind: string, state: SimState, ctx: EffectContext): number {
+  if (ctx.relevant.has(card.key)) return 10
+  const name = nameOf(card)
+  switch (kind) {
+    case 'item': {
+      if (!isImplemented(card) || name === norm('Secret Box')) return 0
+      if (name === norm('Rare Candy')) {
+        const stage2Goal = [...ctx.relevant].some((key) => state.deck.concat(state.hand).some(
+          (c) => c.key === key && c.tags.includes('stage2'),
+        ))
+        return stage2Goal ? 4 : 0
+      }
+      const searches = card.tags.includes('poke-search') || card.tags.includes('search-to-hand')
+      return searches ? 3 : 1
+    }
+    case 'tool':
+      return name === norm('Air Balloon') && ctx.activeKey !== null ? 2 : 0
+    case 'supporter': {
+      if (!isImplemented(card)) return 0
+      if (state.usedSupporter && !ctx.multiTurn) return 0
+      return card.tags.includes('draw') || card.tags.includes('hand-refresh') ? 3 : 2
+    }
+    case 'stadium':
+      if (name === norm('Forest of Vitality') && ctx.wantsGrassEvolution) return 2
+      if (name === norm('Area Zero Underdepths') && ctx.wantsAnyBench) return 2
+      return 0
+    default:
+      return 0
+  }
+}
 
 // --- draw and refresh ------------------------------------------------------
 
