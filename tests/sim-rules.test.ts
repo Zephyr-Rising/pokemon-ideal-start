@@ -378,3 +378,45 @@ describe('state identity', () => {
     expect(a.active!.energy).toHaveLength(0)
   })
 })
+
+describe('evolution from turn 2', () => {
+  const evo = (key: string, prev: string, type = '', stage = 'stage1') =>
+    card(key, ['pokemon', stage], { name: key, prev, type })
+  const relevantTo = (...keys: string[]): ActionContext => ({ ...ctx, relevant: new Set(keys) })
+  const evolves = (s: SimState, c: ActionContext) =>
+    legalActions(s, c).filter((a) => a.kind === 'evolve').length
+
+  it('needs a Pokémon that has been in play since an earlier turn', () => {
+    const dreepy = basic('dreepy')
+    const drakloak = evo('drakloak', 'dreepy')
+    const settled = { ...inPlay(dreepy), fresh: false }
+    // Turn 1: never.
+    expect(evolves(state({ active: settled, hand: [drakloak] }), relevantTo('drakloak'))).toBe(0)
+    // Turn 2, but the Dreepy only just arrived: still no.
+    expect(evolves(state({ active: inPlay(dreepy), hand: [drakloak], turn: 2 }), relevantTo('drakloak'))).toBe(0)
+    // Turn 2, a Dreepy from last turn: yes.
+    expect(evolves(state({ active: settled, hand: [drakloak], turn: 2 }), relevantTo('drakloak'))).toBe(1)
+  })
+
+  it('lets Forest of Vitality evolve a Grass Pokémon the turn it arrives', () => {
+    const forest = card('forest', ['stadium'], { name: 'Forest of Vitality' })
+    const sprout = card('sprout', ['pokemon', 'basic'], { name: 'sprout', type: '{G}' })
+    const bloom = evo('bloom', 'sprout', '{G}')
+    const s = state({ active: inPlay(sprout), hand: [bloom], turn: 2, stadium: forest })
+    expect(evolves(s, relevantTo('bloom'))).toBe(1)
+    // ...but never on a first turn.
+    expect(evolves({ ...s, turn: 1 }, relevantTo('bloom'))).toBe(0)
+    // ...and only Grass into Grass.
+    const fire = card('ember', ['pokemon', 'basic'], { name: 'ember', type: '{R}' })
+    const blaze = evo('blaze', 'ember', '{R}')
+    expect(evolves(state({ active: inPlay(fire), hand: [blaze], turn: 2, stadium: forest }), relevantTo('blaze'))).toBe(0)
+  })
+
+  it('evolves into a draw engine even when the goal does not name it', () => {
+    const settled = { ...inPlay(basic('Dreepy')), fresh: false }
+    const drakloak = evo('drakloak', 'Dreepy')
+    drakloak.card!.name = 'Drakloak'
+    const s = state({ active: settled, hand: [drakloak], turn: 2 })
+    expect(evolves(s, relevantTo())).toBe(1)
+  })
+})

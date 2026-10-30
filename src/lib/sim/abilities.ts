@@ -1,31 +1,32 @@
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
 import { supporterChoices, takeFromTop } from './deck-look'
-import type { EffectContext } from './effects'
+import { payDiscard, type EffectContext } from './effects'
+import { hashString, mulberry32, shuffled } from './rng'
 import {
   ACTIVE_TARGET,
   benchCap,
   cardName,
   cloneState,
   energyType,
+  signature,
   type InPlay,
   type SimState,
 } from './state'
 
 /**
- * Pokémon Abilities that can change your own board on turn 1.
+ * Pokémon Abilities that can change your own board.
  *
- * Only Basic Pokémon are ever in play on turn 1, so an Ability on an evolution
- * — Dudunsparce's Run Away Draw, Alakazam's Psychic Draw, N's Zoroark ex's
- * Trade — simply cannot fire, and is absent by design rather than by omission.
- * Fezandipiti ex needs one of your Pokémon to have been Knocked Out, which also
- * cannot have happened yet.
+ * On turn 1 only Basic Pokémon are in play, and across the whole Standard pool
+ * only five Basics have a draw or search Ability that works then; all five are
+ * here. From turn 2 Pokémon evolve, so the draw Abilities of evolutions —
+ * Drakloak, Dudunsparce, N's Zoroark ex, Kadabra and Alakazam — come online
+ * too. Fezandipiti ex needs one of your Pokémon to have been Knocked Out, which
+ * cannot happen without an opponent, so it stays out.
  *
- * Across the whole Standard pool only five Basics have a draw or search Ability
- * that works on turn 1, and all five are here. The rest of the file covers the
- * Abilities that move Pokémon around, which matter just as much for reaching a
- * particular board. Latias ex's Skyliner is a passive, so it lives in `state.ts`
- * beside the retreat cost it changes.
+ * The rest of the file covers the Abilities that move Pokémon around, which
+ * matter just as much for reaching a particular board. Latias ex's Skyliner is
+ * a passive, so it lives in `state.ts` beside the retreat cost it changes.
  */
 
 export interface AbilityDef {
@@ -37,6 +38,15 @@ export interface AbilityDef {
   onBenchPlay?: boolean
   /** Changes which Pokémon is Active, so it is pointless without an Active goal. */
   switchesActive?: boolean
+  /**
+   * Each copy may use it once a turn, rather than once a turn across copies.
+   * Tracked on the Pokémon itself instead of by name.
+   */
+  perCopy?: boolean
+  /** Fires as the Pokémon is played from hand to evolve, rather than at will. */
+  onEvolve?: boolean
+  /** Draws or searches, so evolving into it is worth it even unnamed. */
+  draws?: boolean
   /** Extra conditions beyond position and once-per-turn. */
   usable?: (state: SimState, slot: InPlay) => boolean
   /** Every board this Ability can produce. */
@@ -91,14 +101,18 @@ const holdsEnergy = (state: SimState, type: string) =>
   state.hand.some((card) => isBasicEnergy(card) && energyType(card) === type)
 
 /** Mark an Ability as spent for the turn. */
-function spend(state: SimState, card: DeckCard): SimState {
+function spend(state: SimState, target: number): SimState {
   const next = cloneState(state)
-  next.usedAbilities = [...next.usedAbilities, norm(cardName(card))]
+  const slot = slotAt(next, target)!
+  if (abilityOf(slot.card)?.perCopy) slot.usedAbility = true
+  else next.usedAbilities = [...next.usedAbilities, norm(cardName(slot.card))]
   return next
 }
 
-const spent = (state: SimState, card: DeckCard) =>
-  state.usedAbilities.includes(norm(cardName(card)))
+const spent = (state: SimState, slot: InPlay) =>
+  abilityOf(slot.card)?.perCopy
+    ? slot.usedAbility === true
+    : state.usedAbilities.includes(norm(cardName(slot.card)))
 
 /** Pull one named card out of the deck and into hand. */
 function fetch(state: SimState, card: DeckCard): SimState {
@@ -138,10 +152,10 @@ export function abilityAvailable(state: SimState, target: number): boolean {
   const slot = slotAt(state, target)
   if (!slot) return false
   const def = abilityOf(slot.card)
-  // An on-bench-play Ability is not a move the player chooses to make.
-  if (!def || def.onBenchPlay) return false
+  // Abilities that trigger on a play are not moves the player chooses to make.
+  if (!def || def.onBenchPlay || def.onEvolve) return false
   if (def.activeOnly && target !== ACTIVE_TARGET) return false
-  if (spent(state, slot.card)) return false
+  if (spent(state, slot)) return false
   return def.usable ? def.usable(state, slot) : true
 }
 
@@ -149,7 +163,20 @@ export function useAbility(state: SimState, target: number, ctx: EffectContext):
   const slot = slotAt(state, target)
   const def = slot && abilityOf(slot.card)
   if (!slot || !def) return [state]
-  return def.apply(spend(state, slot.card), target, ctx)
+  return def.apply(spend(state, target), target, ctx)
+}
+
+/**
+ * Abilities that fire as a Pokémon is played from hand to evolve — Kadabra and
+ * Alakazam's Psychic Draw. Rare Candy counts: it plays the Stage 2 from hand.
+ * Optional, so the declined board comes back too.
+ */
+export function onEvolve(state: SimState, target: number, ctx: EffectContext): SimState[] {
+  const slot = slotAt(state, target)
+  const def = slot && abilityOf(slot.card)
+  if (!slot || !def?.onEvolve || spent(state, slot)) return [state]
+  if (def.usable && !def.usable(state, slot)) return [state]
+  return [...def.apply(spend(state, target), target, ctx), state]
 }
 
 /**
@@ -162,9 +189,9 @@ export function useAbility(state: SimState, target: number, ctx: EffectContext):
 export function onBenchPlay(state: SimState, benchIndex: number, ctx: EffectContext): SimState[] {
   const slot = state.bench[benchIndex]
   const def = slot && abilityOf(slot.card)
-  if (!slot || !def?.onBenchPlay || spent(state, slot.card)) return [state]
+  if (!slot || !def?.onBenchPlay || spent(state, slot)) return [state]
   if (def.usable && !def.usable(state, slot)) return [state]
-  return [...def.apply(spend(state, slot.card), benchIndex, ctx), state]
+  return [...def.apply(spend(state, benchIndex), benchIndex, ctx), state]
 }
 
 /** One card a draw engine needs, and where it stands. */
@@ -365,6 +392,99 @@ register('Tatsugiri', {
     if (found.length === 0) return [takeFromTop(state, 6, [], ctx)]
     return found.map((card) => takeFromTop(state, 6, [card], ctx))
   },
+})
+
+// --- evolutions (turn 2 onward) -------------------------------------------
+
+// "Once during your turn, you may look at the top 2 cards of your deck and put
+// 1 of them into your hand. Put the other card on the bottom of your deck."
+register('Drakloak', {
+  ability: 'Recon Directive',
+  perCopy: true,
+  draws: true,
+  usable: (state) => state.deck.length > 0,
+  apply: (state) => {
+    const top = distinct(state.deck.slice(0, 2))
+    return top.map((card) => {
+      const next = cloneState(state)
+      const [a, b] = next.deck.splice(0, 2)
+      const kept = a.key === card.key ? a : b
+      const other = kept === a ? b : a
+      next.hand.push(kept)
+      if (other) next.deck.push(other)
+      return next
+    })
+  },
+})
+
+// "Once during your turn, you may draw 3 cards. If you drew any cards in this
+// way, shuffle this Pokémon and all attached cards into your deck."
+register('Dudunsparce', {
+  ability: 'Run Away Draw',
+  draws: true,
+  usable: (state, slot) =>
+    state.deck.length > 0 &&
+    // An Active that leaves needs a benched Pokémon to take its place.
+    (slot !== state.active || state.bench.length > 0),
+  apply: (state, target, ctx) => {
+    const drawn = drawInto(state, 3)
+    const leaving = slotAt(drawn, target)!
+    const returned = [leaving.card, ...leaving.energy, ...leaving.tools]
+    const rng = mulberry32(ctx.seed ^ hashString(signature(state)))
+    const shuffleBack = (next: SimState) => {
+      next.deck = shuffled([...next.deck, ...returned], rng)
+      return next
+    }
+    if (target !== ACTIVE_TARGET) {
+      const next = cloneState(drawn)
+      next.bench.splice(target, 1)
+      return [shuffleBack(next)]
+    }
+    // Leaving the Active Spot: each distinct benched Pokémon could step up.
+    const seen = new Set<string>()
+    const out: SimState[] = []
+    drawn.bench.forEach((slot, benchIndex) => {
+      if (seen.has(slot.card.key)) return
+      seen.add(slot.card.key)
+      const next = cloneState(drawn)
+      next.active = next.bench[benchIndex]
+      next.bench.splice(benchIndex, 1)
+      out.push(shuffleBack(next))
+    })
+    return out
+  },
+})
+
+// "You must discard a card from your hand in order to use this Ability. Once
+// during your turn, you may draw 2 cards."
+register("N's Zoroark ex", {
+  ability: 'Trade',
+  perCopy: true,
+  draws: true,
+  usable: (state) => state.hand.length > 0 && state.deck.length > 0,
+  apply: (state, _target, ctx) => {
+    const paid = payDiscard(state, 1, ctx)
+    return paid ? [drawInto(paid, 2)] : [state]
+  },
+})
+
+// "Once during your turn, when you play this Pokémon from your hand to evolve 1
+// of your Pokémon, you may use this Ability. Draw 2 cards." (Kadabra) and
+// "...Draw 3 cards." (Alakazam). Kadabra and Alakazam share the Ability's name,
+// but each is once per Pokémon played, so it is tracked per copy.
+register('Kadabra', {
+  ability: 'Psychic Draw',
+  onEvolve: true,
+  perCopy: true,
+  draws: true,
+  apply: (state) => [drawInto(state, 2)],
+})
+register('Alakazam', {
+  ability: 'Psychic Draw',
+  onEvolve: true,
+  perCopy: true,
+  draws: true,
+  apply: (state) => [drawInto(state, 3)],
 })
 
 // --- moving Pokémon around -------------------------------------------------

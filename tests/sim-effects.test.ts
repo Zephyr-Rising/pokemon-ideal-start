@@ -440,7 +440,7 @@ describe('switching and recovery', () => {
 })
 
 describe('cards that cannot matter on turn 1', () => {
-  it.each(['Unfair Stamp', 'Special Red Card', "Boss's Orders", 'Rare Candy', "Ciphermaniac's Codebreaking"])(
+  it.each(['Unfair Stamp', 'Special Red Card', "Boss's Orders", "Ciphermaniac's Codebreaking"])(
     '%s is deliberately not implemented',
     (name) => {
       // Each is impossible or pointless on turn 1 — being inert is correct, not
@@ -513,5 +513,39 @@ describe('Roto-Stick', () => {
     const [after] = play('Roto-Stick', s)
     expect(keys(after.hand).sort()).toEqual(['judge', "lillie's-determination"])
     expect(after.deck).toHaveLength(3)
+  })
+})
+
+describe('Rare Candy', () => {
+  const dreepy = basic('Dreepy', 70, { type: '{P}' })
+  const dragapult = card('Dragapult ex', ['pokemon', 'stage2', 'ex'], {
+    name: 'Dragapult ex',
+    prev: 'Drakloak',
+    rule: 'Pokémon ex',
+  })
+  const lines = ctx({
+    relevant: new Set(['Dragapult ex']),
+    prevOf: new Map([
+      ['drakloak', 'dreepy'],
+      ['dragapult ex', 'drakloak'],
+    ]),
+  })
+  const settled = { ...inPlay(dreepy), fresh: false }
+
+  it('does nothing on a first turn', () => {
+    const s = state({ active: settled, hand: [dragapult] })
+    expect(play('Rare Candy', s, lines)).toEqual([s])
+  })
+
+  it('evolves a Basic straight to its Stage 2 from turn 2', () => {
+    const s = state({ active: settled, hand: [dragapult], turn: 2 })
+    const [after] = play('Rare Candy', s, lines)
+    expect(after.active?.card.key).toBe('Dragapult ex')
+    expect(after.hand).toHaveLength(0)
+  })
+
+  it('cannot touch a Basic put into play this turn', () => {
+    const s = state({ active: inPlay(dreepy), hand: [dragapult], turn: 2 })
+    expect(play('Rare Candy', s, lines)).toEqual([s])
   })
 })

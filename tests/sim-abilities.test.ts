@@ -316,3 +316,61 @@ describe('Attract Customers (Tatsugiri)', () => {
     expect(useAbility(miss, ACTIVE_TARGET, ctx()).map((r) => r.hand.length)).toEqual([0])
   })
 })
+
+describe('Abilities of evolved Pokémon', () => {
+  const stage1 = (name: string, prev: string) =>
+    card(name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), ['pokemon', 'stage1'], { name, prev })
+
+  it('Drakloak keeps one of the top two and bottoms the other, once per copy', () => {
+    const drakloak = stage1('Drakloak', 'Dreepy')
+    const [a, b] = deckOf(2)
+    const s = state({
+      active: { ...inPlay(drakloak), fresh: false },
+      bench: [{ ...inPlay(drakloak), fresh: false }],
+      deck: [a, b, ...deckOf(3).map((c) => ({ ...c, key: `${c.key}-rest` }))],
+    })
+    const results = useAbility(s, ACTIVE_TARGET, ctx())
+    expect(results.map((r) => r.hand[0].key).sort()).toEqual([a.key, b.key].sort())
+    for (const r of results) expect(r.deck[r.deck.length - 1].key).not.toBe(r.hand[0].key)
+    // The benched copy can still use its own.
+    expect(abilityAvailable(results[0], ACTIVE_TARGET)).toBe(false)
+    expect(abilityAvailable(results[0], 0)).toBe(true)
+  })
+
+  it('Dudunsparce draws 3 and shuffles itself and its attachments away', () => {
+    const dudunsparce = stage1('Dudunsparce', 'Dunsparce')
+    const s = state({
+      active: inPlay(mon('x')),
+      bench: [{ ...inPlay(dudunsparce), energy: [energy('{G}')] }],
+      deck: deckOf(5),
+    })
+    const [after] = useAbility(s, 0, ctx())
+    expect(after.hand).toHaveLength(3)
+    expect(after.bench).toHaveLength(0)
+    // 5 - 3 drawn + Dudunsparce + its Energy.
+    expect(after.deck).toHaveLength(4)
+  })
+
+  it('Dudunsparce in the Active Spot needs someone to take its place', () => {
+    const dudunsparce = stage1('Dudunsparce', 'Dunsparce')
+    const alone = state({ active: inPlay(dudunsparce), deck: deckOf(5) })
+    expect(abilityAvailable(alone, ACTIVE_TARGET)).toBe(false)
+    const withBench = state({ active: inPlay(dudunsparce), bench: [inPlay(mon('y'))], deck: deckOf(5) })
+    const [after] = useAbility(withBench, ACTIVE_TARGET, ctx())
+    expect(after.active?.card.key).toBe('y')
+  })
+
+  it("N's Zoroark ex discards one to draw two", () => {
+    const zoroark = stage1("N's Zoroark ex", "N's Zorua")
+    const s = state({ active: inPlay(zoroark), hand: [energy('{D}')], deck: deckOf(4) })
+    const [after] = useAbility(s, ACTIVE_TARGET, ctx())
+    expect(after.discard).toHaveLength(1)
+    expect(after.hand).toHaveLength(2)
+  })
+
+  it('Psychic Draw fires as Kadabra and Alakazam are played to evolve, not at will', () => {
+    const kadabra = stage1('Kadabra', 'Abra')
+    const s = state({ active: inPlay(kadabra), deck: deckOf(5) })
+    expect(abilityAvailable(s, ACTIVE_TARGET)).toBe(false)
+  })
+})

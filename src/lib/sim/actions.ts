@@ -1,6 +1,13 @@
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
-import { abilityAvailable, abilityOf, engineBenches, onBenchPlay, useAbility } from './abilities'
+import {
+  abilityAvailable,
+  abilityOf,
+  engineBenches,
+  onBenchPlay,
+  onEvolve,
+  useAbility,
+} from './abilities'
 import { lookupEffect, type EffectContext } from './effects'
 import {
   ACTIVE_TARGET,
@@ -8,13 +15,16 @@ import {
   cardName,
   cloneState,
   energyType,
+  evolveSlot,
   inPlay,
+  isEvolutionCard,
   isBasicPokemon,
   isEnergy,
   isItem,
   isStadium,
   isSupporter,
   isTool,
+  mayEvolve,
   retreatCost,
   type SimState,
 } from './state'
@@ -36,6 +46,7 @@ export type Action =
   | { kind: 'playSupporter'; handIndex: number }
   | { kind: 'playStadium'; handIndex: number }
   | { kind: 'useAbility'; target: number }
+  | { kind: 'evolve'; handIndex: number; target: number }
   | { kind: 'retreat'; benchIndex: number }
   | { kind: 'end' }
 
@@ -60,8 +71,14 @@ const AREA_ZERO = norm('Area Zero Underdepths')
  * A Stadium is worth playing only if the goal asked for it, or if it is Area
  * Zero Underdepths and the goal wants a bench bigger than five.
  */
-const stadiumWorthPlaying = (card: DeckCard, ctx: ActionContext): boolean =>
-  ctx.relevant.has(card.key) || (ctx.wantsAnyBench && norm(cardName(card)) === AREA_ZERO)
+const stadiumWorthPlaying = (card: DeckCard, ctx: ActionContext, state: SimState): boolean =>
+  ctx.relevant.has(card.key) ||
+  (ctx.wantsAnyBench && norm(cardName(card)) === AREA_ZERO) ||
+  // Forest of Vitality only matters from turn 2, and only for a goal that
+  // wants a Grass Pokémon evolved.
+  (norm(cardName(card)) === FOREST && (state.turn ?? 1) >= 2 && ctx.wantsGrassEvolution === true)
+
+const FOREST = norm('Forest of Vitality')
 
 /**
  * Is benching this Pokémon worth a bench slot?
@@ -78,6 +95,9 @@ function benchWorthwhile(state: SimState, ctx: ActionContext): (card: DeckCard) 
     ctx.relevant.has(card.key) ||
     ctx.wantsAnyBench ||
     forEngine(card) ||
+    // Looking past this turn, a Basic that evolves into a draw engine is a
+    // play in progress (Dunsparce, N's Zorua).
+    (ctx.multiTurn === true && ctx.drawEvolutionBases?.has(norm(cardName(card))) === true) ||
     (ctx.activeKey !== null && abilityOf(card)?.switchesActive === true)
 }
 
@@ -95,8 +115,8 @@ function needsRetreatEnergy(state: SimState, ctx: ActionContext): boolean {
 /**
  * Every play available right now.
  *
- * Nothing evolves: each Pokémon in play was put there this turn, so evolution
- * cards (and Rare Candy) are simply not playable on turn 1 and never appear.
+ * Nothing evolves on a player's first turn. From turn 2 a Pokémon in play since
+ * an earlier turn may evolve (see `mayEvolve`), and Rare Candy works too.
  */
 export function legalActions(state: SimState, ctx: ActionContext): Action[] {
   const actions: Action[] = []
@@ -162,6 +182,22 @@ export function legalActions(state: SimState, ctx: ActionContext): Action[] {
     })
   }
 
+  // Evolving is worth it into a card the goal names, or one on the way to it
+  // (the goal's lineage is already folded into `relevant`), or into a Pokémon
+  // whose Ability draws, which is how a deck digs for the rest.
+  const seenEvolve = new Set<string>()
+  state.hand.forEach((card, handIndex) => {
+    if (!isEvolutionCard(card)) return
+    if (!ctx.relevant.has(card.key) && !abilityOf(card)?.draws) return
+    for (const target of targets(state)) {
+      const slot = slotAt(state, target)!
+      const key = `${card.key}>${slot.card.key}${slot.fresh ? '*' : ''}`
+      if (seenEvolve.has(key) || !mayEvolve(state, slot, card)) continue
+      seenEvolve.add(key)
+      actions.push({ kind: 'evolve', handIndex, target })
+    }
+  })
+
   const seenTool = new Set<string>()
   state.hand.forEach((card, handIndex) => {
     if (!isTool(card) || seenTool.has(card.key)) return
@@ -190,7 +226,7 @@ export function legalActions(state: SimState, ctx: ActionContext): Action[] {
     } else if (isSupporter(card) && effect && !state.usedSupporter) {
       seenPlay.add(card.key)
       actions.push({ kind: 'playSupporter', handIndex })
-    } else if (isStadium(card) && !state.usedStadium && stadiumWorthPlaying(card, ctx)) {
+    } else if (isStadium(card) && !state.usedStadium && stadiumWorthPlaying(card, ctx, state)) {
       // A Stadium with the same name as the one already out cannot be played.
       const sameName = state.stadium !== null && norm(cardName(state.stadium)) === norm(cardName(card))
       if (!sameName) {
@@ -250,6 +286,14 @@ export function applyAction(state: SimState, action: Action, ctx: ActionContext)
 
     case 'useAbility':
       return useAbility(state, action.target, ctx)
+
+    case 'evolve': {
+      const { card, next } = take(state, action.handIndex)
+      if (action.target === ACTIVE_TARGET) next.active = evolveSlot(next.active!, card)
+      else next.bench[action.target] = evolveSlot(next.bench[action.target], card)
+      // Psychic Draw fires as the Pokémon is played to evolve.
+      return onEvolve(next, action.target, ctx)
+    }
 
     case 'attachEnergy': {
       const { card, next } = take(state, action.handIndex)

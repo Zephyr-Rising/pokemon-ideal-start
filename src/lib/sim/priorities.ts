@@ -48,6 +48,10 @@ export function actionPriority(state: SimState, action: Action, ctx: ActionConte
     case 'placeActive':
       return TIER.placeActive + relevant
 
+    case 'evolve':
+      // Evolving only ever happens toward the goal, and costs nothing else.
+      return TIER.ability + 500 + relevant
+
     case 'bench':
       // Filling the bench is the single highest-value setup action, and more so
       // when the goal named this Pokémon or simply wants more bodies.

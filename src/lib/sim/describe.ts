@@ -64,6 +64,28 @@ function energised(before: SimState, after: SimState): string[] {
   return names
 }
 
+/** "Dreepy into Dragapult ex" for every Pokémon a play evolved in place. */
+function evolutions(before: SimState, after: SimState): string[] {
+  const pairs = [
+    [before.active, after.active],
+    ...before.bench.map((slot, i) => [slot, after.bench[i]] as const),
+  ] as const
+  const out: string[] = []
+  for (const [was, now] of pairs) {
+    if (was && now && was.card.key !== now.card.key && now.card.card?.prev === cardName(was.card)) {
+      out.push(`${label(was.card)} into ${label(now.card)}`)
+    }
+  }
+  // Rare Candy skips a stage, so the Stage 2's own prev is not the Basic.
+  for (const [was, now] of pairs) {
+    if (was && now && was.card.key !== now.card.key && now.card.tags.includes('stage2') &&
+        now.card.card?.prev !== cardName(was.card) && now.energy.length === was.energy.length) {
+      out.push(`${label(was.card)} into ${label(now.card)}`)
+    }
+  }
+  return out
+}
+
 /** One step of the line, as the player would describe it. */
 export function describeStep(before: SimState, after: SimState, action: Action): string {
   const benched = gained(
@@ -109,6 +131,11 @@ export function describeStep(before: SimState, after: SimState, action: Action):
       return outcome.length > 0 ? `${used} — ${outcome.join(', ')}` : used
     }
 
+    case 'evolve': {
+      const from = action.target === ACTIVE_TARGET ? before.active! : before.bench[action.target]
+      return `Evolve ${label(from.card)} into ${label(before.hand[action.handIndex])}`
+    }
+
     case 'attachEnergy': {
       const card = before.hand[action.handIndex]
       const target =
@@ -140,6 +167,9 @@ export function describeStep(before: SimState, after: SimState, action: Action):
 
       const energyTargets = energised(before, after)
       if (energyTargets.length > 0) outcome.push(`attaching to ${list(energyTargets)}`)
+
+      const evolved = evolutions(before, after)
+      if (evolved.length > 0) outcome.push(`evolving ${list(evolved)}`)
 
       const discarded = after.discard.length - before.discard.length - 1
       if (discarded > 0) outcome.push(`discarding ${discarded}`)

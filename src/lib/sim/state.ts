@@ -18,6 +18,17 @@ export interface InPlay {
   card: DeckCard
   energy: DeckCard[]
   tools: DeckCard[]
+  /**
+   * Put into play or evolved this turn. Such a Pokémon cannot evolve again
+   * this turn, except Grass into Grass under Forest of Vitality.
+   */
+  fresh?: boolean
+  /**
+   * This Pokémon's own once-per-turn Ability is spent. Used by Abilities each
+   * copy may use separately (Drakloak, N's Zoroark ex); evolving makes it a
+   * new Pokémon, so the flag starts clear again.
+   */
+  usedAbility?: boolean
 }
 
 export interface SimState {
@@ -36,6 +47,11 @@ export interface SimState {
   usedRetreat: boolean
   /** Normalised names of Abilities already used this turn. */
   usedAbilities: string[]
+  /**
+   * This player's turn number, from 1. Absent means turn 1, which is all the
+   * turn-1 playtest ever runs. Nothing evolves on a player's first turn.
+   */
+  turn?: number
 }
 
 /** Target index convention: -1 is the Active Spot, 0+ indexes the bench. */
@@ -45,7 +61,7 @@ export const BASE_BENCH = 5
 const EXPANDED_BENCH = 8
 const AREA_ZERO = norm('Area Zero Underdepths')
 
-export const inPlay = (card: DeckCard): InPlay => ({ card, energy: [], tools: [] })
+export const inPlay = (card: DeckCard): InPlay => ({ card, energy: [], tools: [], fresh: true })
 
 /**
  * The card's canonical name.
@@ -134,12 +150,20 @@ export function cloneState(state: SimState): SimState {
     discard: [...state.discard],
     prizes: state.prizes,
     active: state.active
-      ? { card: state.active.card, energy: [...state.active.energy], tools: [...state.active.tools] }
+      ? {
+          card: state.active.card,
+          energy: [...state.active.energy],
+          tools: [...state.active.tools],
+          fresh: state.active.fresh,
+          usedAbility: state.active.usedAbility,
+        }
       : null,
     bench: state.bench.map((slot) => ({
       card: slot.card,
       energy: [...slot.energy],
       tools: [...slot.tools],
+      fresh: slot.fresh,
+      usedAbility: slot.usedAbility,
     })),
     stadium: state.stadium,
     usedEnergy: state.usedEnergy,
@@ -147,6 +171,7 @@ export function cloneState(state: SimState): SimState {
     usedStadium: state.usedStadium,
     usedRetreat: state.usedRetreat,
     usedAbilities: state.usedAbilities,
+    turn: state.turn,
   }
 }
 
@@ -160,7 +185,7 @@ export function cloneState(state: SimState): SimState {
  */
 export function signature(state: SimState): string {
   const slot = (s: InPlay) =>
-    `${s.card.key}+${s.energy.map(energyType).sort().join('')}+${s.tools.map((t) => t.key).sort().join('')}`
+    `${s.card.key}+${s.energy.map(energyType).sort().join('')}+${s.tools.map((t) => t.key).sort().join('')}${s.fresh ? '*' : ''}${s.usedAbility ? '!' : ''}`
   const flags = [state.usedEnergy, state.usedSupporter, state.usedStadium, state.usedRetreat]
     .map((f) => (f ? '1' : '0'))
     .join('')
@@ -173,5 +198,62 @@ export function signature(state: SimState): string {
     state.deck.length,
     flags,
     [...state.usedAbilities].sort().join(','),
+    state.turn ?? 1,
   ].join('|')
+}
+
+// --- turns and evolution -----------------------------------------------------
+
+const FOREST_OF_VITALITY = norm('Forest of Vitality')
+
+/** Does `evolution` evolve from the Pokémon `from`, by the card's own text? */
+export const evolvesFrom = (evolution: DeckCard, from: DeckCard): boolean =>
+  (evolution.card?.prev ?? '') !== '' && norm(evolution.card!.prev) === norm(cardName(from))
+
+export const isEvolutionCard = (card: DeckCard): boolean =>
+  card.tags.includes('stage1') || card.tags.includes('stage2')
+
+const isGrass = (card: DeckCard) => (card.card?.type ?? '').includes('{G}')
+
+/**
+ * May this Pokémon evolve into `evolution` right now?
+ *
+ * Never on a player's first turn. Otherwise only a Pokémon that has been in
+ * play since an earlier turn — unless Forest of Vitality is out, which lets a
+ * Grass Pokémon put into play (or evolved) this turn evolve into a Grass one.
+ */
+export function mayEvolve(state: SimState, slot: InPlay, evolution: DeckCard): boolean {
+  if ((state.turn ?? 1) < 2) return false
+  if (!evolvesFrom(evolution, slot.card)) return false
+  if (!slot.fresh) return true
+  const forest = state.stadium !== null && norm(cardName(state.stadium)) === FOREST_OF_VITALITY
+  return forest && isGrass(slot.card) && isGrass(evolution)
+}
+
+/** Put an evolution card onto a Pokémon, keeping what is attached to it. */
+export const evolveSlot = (slot: InPlay, evolution: DeckCard): InPlay => ({
+  card: evolution,
+  energy: slot.energy,
+  tools: slot.tools,
+  fresh: true,
+})
+
+/**
+ * Begin the player's next turn: once-per-turn plays come back, nothing in play
+ * is fresh any more, and the turn's card is drawn.
+ */
+export function startNextTurn(state: SimState): SimState {
+  const next = cloneState(state)
+  next.turn = (state.turn ?? 1) + 1
+  next.usedEnergy = false
+  next.usedSupporter = false
+  next.usedStadium = false
+  next.usedRetreat = false
+  next.usedAbilities = []
+  for (const slot of [...(next.active ? [next.active] : []), ...next.bench]) {
+    slot.fresh = false
+    slot.usedAbility = false
+  }
+  next.hand.push(...next.deck.splice(0, 1))
+  return next
 }

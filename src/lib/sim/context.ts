@@ -1,4 +1,8 @@
 import type { FieldGoal } from '../board/goal'
+import { norm } from '../normalize'
+import type { DeckCard } from '../types'
+import { abilityOf } from './abilities'
+import { cardName } from './state'
 import type { ActionContext } from './actions'
 
 /**
@@ -15,12 +19,52 @@ import type { ActionContext } from './actions'
  * depends on what is already on the board, so it is worked out per state by
  * `engineWants` in `abilities.ts` rather than fixed here.
  */
-export function buildContext(goal: FieldGoal, rng: () => number, seed = 1): ActionContext {
+export function buildContext(
+  goal: FieldGoal,
+  rng: () => number,
+  seed = 1,
+  cards: DeckCard[] = [],
+): ActionContext {
   const relevant = new Set<string>()
   if (goal.active) relevant.add(goal.active.cardKey)
   for (const slot of goal.bench) relevant.add(slot.cardKey)
   if (goal.stadiumKey) relevant.add(goal.stadiumKey)
   for (const want of goal.inHand) relevant.add(want.cardKey)
+
+  // A goal Pokémon that evolves is reached through its earlier stages, so they
+  // matter too: Dragapult ex on the board makes Dreepy and Drakloak worth
+  // benching, fetching and evolving.
+  const prevOf = new Map<string, string>()
+  for (const card of cards) {
+    if (card.card?.prev) prevOf.set(norm(cardName(card)), norm(card.card.prev))
+  }
+  const byName = new Map<string, DeckCard[]>()
+  for (const card of cards) {
+    const name = norm(cardName(card))
+    byName.set(name, [...(byName.get(name) ?? []), card])
+  }
+  // Basics that grow into a draw engine — worth benching when the game runs
+  // long enough for them to evolve.
+  const drawEvolutionBases = new Set<string>()
+  for (const card of cards) {
+    if (!card.card?.prev || !abilityOf(card)?.draws) continue
+    let base: string | undefined = norm(card.card.prev)
+    for (let depth = 0; base && prevOf.has(base) && depth < 2; depth++) base = prevOf.get(base)
+    if (base) drawEvolutionBases.add(base)
+  }
+
+  let wantsGrassEvolution = false
+  for (const key of [...relevant]) {
+    const card = cards.find((c) => c.key === key)
+    if (!card) continue
+    if (card.card?.prev && (card.card.type ?? '').includes('{G}')) wantsGrassEvolution = true
+    let prev = card.card?.prev ? norm(card.card.prev) : null
+    // Bounded, in case a malformed chain ever loops.
+    for (let depth = 0; prev && depth < 3; depth++) {
+      for (const earlier of byName.get(prev) ?? []) relevant.add(earlier.key)
+      prev = prevOf.get(prev) ?? null
+    }
+  }
 
   const energySlots = [...(goal.active ? [goal.active] : []), ...goal.bench].filter(
     (slot) => slot.energy.length > 0,
@@ -44,6 +88,9 @@ export function buildContext(goal: FieldGoal, rng: () => number, seed = 1): Acti
     energyTypes,
     energyTargets,
     activeKey: goal.active?.cardKey ?? null,
+    prevOf,
+    wantsGrassEvolution,
+    drawEvolutionBases,
     rng,
     seed,
   }

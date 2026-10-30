@@ -1,13 +1,14 @@
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
 import { hashString, mulberry32, shuffled } from './rng'
-import { engineKeeps, engineWants } from './abilities'
-import { supporterChoices, takeFromTop, topOf } from './deck-look'
+import { engineKeeps, engineWants, onEvolve } from './abilities'
+import { distinctCards, supporterChoices, takeFromTop, topOf } from './deck-look'
 import {
   benchCap,
   cardName,
   cloneState,
   energyType,
+  evolveSlot,
   inPlay,
   isBasicPokemon,
   isEnergy,
@@ -28,8 +29,9 @@ import {
  * Stamp needs one of your Pokémon to have been Knocked Out, Special Red Card
  * needs the opponent down to three Prizes, Rosa's Encouragement needs more
  * Prizes remaining than they have, and Boss's Orders only moves their Pokémon.
- * Nothing evolves either, so Rare Candy is dead. Ciphermaniac's Codebreaking
- * stacks the top of the deck, which changes next turn's draw, not this board.
+ * Ciphermaniac's Codebreaking stacks the top of the deck, which changes next
+ * turn's draw, not this board. Rare Candy is here for turn 2 onward, and does
+ * nothing on a player's first turn, as the card itself says.
  */
 export interface EffectContext {
   /** Card keys the goal mentions — effect choices are narrowed to these. */
@@ -44,6 +46,17 @@ export interface EffectContext {
   energyTargets: Set<string>
   /** The card the goal wants Active, if any. */
   activeKey: string | null
+  /**
+   * Evolution lines in this deck, as normalised name to the name it evolves
+   * from. Rare Candy needs it to see through the Stage 1 it skips.
+   */
+  prevOf?: Map<string, string>
+  /** The goal wants a Grass evolution, which is what Forest of Vitality helps. */
+  wantsGrassEvolution?: boolean
+  /** Basics in this deck that evolve into a Pokémon with a draw Ability. */
+  drawEvolutionBases?: Set<string>
+  /** Playing over several turns, so setting up for a later turn counts. */
+  multiTurn?: boolean
   /** Deterministic randomness for anything that needs a roll. */
   rng: () => number
   /** This trial's seed. Shuffle effects derive their own stream from it. */
@@ -139,7 +152,11 @@ const removeFirst = (pool: DeckCard[], card: DeckCard): void => {
  * least useful cards is always at least as good, so this resolves to one
  * outcome instead of multiplying the search.
  */
-function payDiscard(state: SimState, count: number, ctx: EffectContext): SimState | null {
+export function payDiscard(
+  state: SimState,
+  count: number,
+  ctx: EffectContext,
+): SimState | null {
   if (state.hand.length < count) return null
   const next = cloneState(state)
   const engine = engineKeeps(state)
@@ -213,6 +230,43 @@ registerEffect('Fighting Gong', (state, ctx) => {
     (isBasicEnergy(card) || isBasicPokemon(card)) && energyType(card) === '{F}'
   const found = choices(state, state.deck, fighting, ctx)
   return found.length > 0 ? found.map((card) => fetchToHand(state, card)) : [state]
+})
+
+// --- evolution ---------------------------------------------------------------
+
+registerEffect('Rare Candy', (state, ctx) => {
+  // "Choose 1 of your Basic Pokémon in play. If you have a Stage 2 card in your
+  // hand that evolves from that Pokémon, put that card onto the Basic Pokémon
+  // to evolve it, skipping the Stage 1. You can't use this card during your
+  // first turn or on a Basic Pokémon that was put into play this turn."
+  //
+  // Forest of Vitality does not loosen this: Rare Candy carries its own rule.
+  if ((state.turn ?? 1) < 2) return [state]
+  const stage2s = distinctCards(
+    state.hand.filter((card) => card.tags.includes('stage2') && ctx.relevant.has(card.key)),
+  )
+  const out: SimState[] = []
+  const slots = [
+    ...(state.active ? [{ slot: state.active, target: -1 }] : []),
+    ...state.bench.map((slot, target) => ({ slot, target })),
+  ]
+  for (const stage2 of stage2s) {
+    const stage1 = norm(stage2.card?.prev ?? '')
+    const basic = ctx.prevOf?.get(stage1)
+    if (!basic) continue
+    const seen = new Set<string>()
+    for (const { slot, target } of slots) {
+      if (slot.fresh || !isBasicPokemon(slot.card) || seen.has(slot.card.key)) continue
+      if (norm(cardName(slot.card)) !== basic) continue
+      seen.add(slot.card.key)
+      const next = cloneState(state)
+      removeFirst(next.hand, stage2)
+      if (target === -1) next.active = evolveSlot(next.active!, stage2)
+      else next.bench[target] = evolveSlot(next.bench[target], stage2)
+      out.push(...onEvolve(next, target, ctx))
+    }
+  }
+  return out.length > 0 ? out : [state]
 })
 
 // --- search the top of the deck ---------------------------------------------
