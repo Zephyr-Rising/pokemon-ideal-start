@@ -112,3 +112,28 @@ describe('either/or across zones', () => {
     expect(removeChoice(g, g.choices![0].id).choices).toEqual([])
   })
 })
+
+describe('a Pokémon wanted in hand', () => {
+  it('is kept in hand, not benched', async () => {
+    const { searchBestLine } = await import('../src/lib/sim/search')
+    const { buildContext } = await import('../src/lib/sim/context')
+    const { legalActions } = await import('../src/lib/sim/actions')
+    const { inPlay } = await import('../src/lib/sim/state')
+    const mon = (k: string) => ({ key: k, label: k, resolvedName: k, count: 1, printings: [], tags: ['pokemon', 'basic'], card: { index: 0, name: k, kind: '', rule: '', prev: '', hp: 70, type: '{W}', retreat: 1, regulationMark: '', effect: '', moves: [], tags: ['pokemon', 'basic'], image: '' } })
+    const kyurem = mon('kyurem')
+    let g: FieldGoal = {
+      ...emptyGoal(),
+      active: slot('a', 'slowpoke'),
+      inHand: [{ id: 'k', cardKey: 'kyurem', count: 1 }],
+    }
+    const ctx = buildContext(g, () => 0.5, 1, [kyurem as never])
+    const s = { hand: [kyurem], deck: [], discard: [], prizes: [], active: inPlay(mon('slowpoke') as never), bench: [], stadium: null, usedEnergy: false, usedSupporter: false, usedStadium: false, usedRetreat: false, usedAbilities: [] }
+    expect(legalActions(s as never, ctx).map((a) => a.kind)).not.toContain('bench')
+    // Even across turns, where Pokémon in play add to the setup score.
+    const multi = { ...ctx, multiTurn: true }
+    const result = searchBestLine(s as never, g, multi, (k) => k)
+    expect(result.finalState.hand.map((c) => c.key)).toContain('kyurem')
+    void g
+    g = emptyGoal()
+  })
+})

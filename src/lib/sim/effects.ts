@@ -69,6 +69,8 @@ export interface EffectContext {
    * how many of that line the goal wants in play. Bench space is kept for them.
    */
   goalLines?: { keys: Set<string>; needed: number }[]
+  /** Cards the goal wants kept in hand and nowhere on the board: never bench these. */
+  handOnly?: Set<string>
   /** Basics in this deck that evolve into a Pokémon with a draw Ability. */
   drawEvolutionBases?: Set<string>
   /** Playing over several turns, so setting up for a later turn counts. */
@@ -277,7 +279,9 @@ function fetchToHand(state: SimState, card: DeckCard): SimState {
 registerEffect('Buddy-Buddy Poffin', (state, ctx) => {
   // "Search your deck for up to 2 Basic Pokémon with 70 HP or less and put them
   // onto your Bench."
-  const eligible = (card: DeckCard) => isBasicPokemon(card) && hp(card) <= 70
+  // Never a Pokémon the goal wants kept in hand.
+  const eligible = (card: DeckCard) =>
+    isBasicPokemon(card) && hp(card) <= 70 && !ctx.handOnly?.has(card.key)
   const out: SimState[] = []
   const first = choices(state, state.deck, eligible, ctx)
 
@@ -699,7 +703,9 @@ export function attachTriggers(
   if (nameOf(energy) === ENRICHING) return state.deck.length > 0
   if (nameOf(energy) !== TELEPATHIC || !isPokemonOfType(holder, '{P}')) return false
   if (state.bench.length >= benchCap(state)) return false
-  return choices(state, state.deck, (card) => isBasicPokemon(card) && isPokemonOfType(card, '{P}'), ctx).length > 0
+  const benchable = (card: DeckCard) =>
+    isBasicPokemon(card) && isPokemonOfType(card, '{P}') && !ctx.handOnly?.has(card.key)
+  return choices(state, state.deck, benchable, ctx).length > 0
 }
 
 /**
@@ -723,7 +729,8 @@ export function onAttachFromHand(
     return [next]
   }
   if (nameOf(energy) !== TELEPATHIC || !isPokemonOfType(holder, '{P}')) return [state]
-  const psychic = (card: DeckCard) => isBasicPokemon(card) && isPokemonOfType(card, '{P}')
+  const psychic = (card: DeckCard) =>
+    isBasicPokemon(card) && isPokemonOfType(card, '{P}') && !ctx.handOnly?.has(card.key)
   const shuffle = (next: SimState) => {
     next.deck = fairShuffle(state, next.deck, ctx.seed)
     next.shuffles = shufflesAfter(state)

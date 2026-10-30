@@ -96,13 +96,19 @@ export function setupScore(state: SimState, ctx: ActionContext): number {
   let score = 0
   for (const slot of allInPlay(state)) {
     const tags = slot.card.tags
-    if (ctx.relevant.has(slot.card.key)) {
+    // A Pokémon the goal wants in hand earns nothing for being in play.
+    if (ctx.relevant.has(slot.card.key) && !ctx.handOnly?.has(slot.card.key)) {
       score += tags.includes('stage2') ? 30 : tags.includes('stage1') ? 20 : 10
     }
     const def = abilityOf(slot.card)
     if (def?.draws || def?.engine || (ctx.wantsEnergy && def?.accelerates)) score += 4
   }
-  return score + state.hand.length * 0.5
+  // A card the goal names, in hand, is a piece waiting to be played — the
+  // next evolution, the missing Basic — and worth more than any card a big
+  // draw might bring. Without this, Lillie's Determination always out-scored
+  // Dawn or Hilda fetching exactly the line.
+  const pieces = new Set(state.hand.filter((card) => ctx.relevant.has(card.key)).map((card) => card.key))
+  return score + pieces.size * 0 + state.hand.length * 0.5
 }
 
 /** One play in a line: what was done, and the boards either side of it. */

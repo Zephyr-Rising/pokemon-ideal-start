@@ -42,6 +42,20 @@ export function buildContext(
   for (const want of goal.inHand) {
     for (const key of acceptedKeys(want.cardKey, want.alternatives)) relevant.add(key)
   }
+  // Cards the goal wants in hand and nowhere on the board: worth fetching and
+  // keeping, but a Pokémon among them must not be benched — that would take
+  // it out of the hand the goal wants it in.
+  const onBoard = new Set<string>()
+  for (const slot of slots) {
+    for (const key of acceptedKeys(slot.cardKey, slot.alternatives)) onBoard.add(key)
+    for (const toolKey of slot.tools) onBoard.add(toolKey)
+  }
+  if (goal.stadiumKey) {
+    for (const key of acceptedKeys(goal.stadiumKey, goal.stadiumAlternatives)) onBoard.add(key)
+  }
+  const handOnly = new Set(
+    goal.inHand.flatMap((want) => acceptedKeys(want.cardKey, want.alternatives)).filter((key) => !onBoard.has(key)),
+  )
 
   // A goal Pokémon that evolves is reached through its earlier stages, so they
   // matter too: Dragapult ex on the board makes Dreepy and Drakloak worth
@@ -164,6 +178,7 @@ export function buildContext(
     activeKey: goal.active?.cardKey ?? null,
     prevOf,
     activeLineage,
+    handOnly,
     goalLines: [...goalLines.values()],
     wantsGrassEvolution,
     drawEvolutionBases,

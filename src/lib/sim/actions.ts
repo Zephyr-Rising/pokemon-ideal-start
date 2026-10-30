@@ -109,6 +109,10 @@ function benchWorthwhile(state: SimState, ctx: ActionContext): (card: DeckCard) 
     const line = ctx.goalLines?.find((l) => l.keys.has(card.key))
     if (line) {
       if (countInPlay(state, line.keys) < line.needed) return true
+    } else if (ctx.handOnly?.has(card.key)) {
+      // Wanted in hand: benching it would undo that. Only a bench count
+      // (handled above) can still call for it.
+      return false
     } else if (ctx.relevant.has(card.key)) {
       return true
     }
