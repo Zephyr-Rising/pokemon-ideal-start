@@ -6,7 +6,7 @@ import { hashString, mulberry32, shuffled } from './rng'
 import {
   ACTIVE_TARGET,
   benchCap,
-  cardName,
+  nameOf,
   cloneState,
   energyType,
   signature,
@@ -72,7 +72,7 @@ const ABILITIES = new Map<string, AbilityDef>()
 const register = (pokemon: string, def: AbilityDef) => ABILITIES.set(norm(pokemon), def)
 
 export const abilityOf = (card: DeckCard): AbilityDef | undefined =>
-  ABILITIES.get(norm(cardName(card)))
+  ABILITIES.get(nameOf(card))
 
 /** Names of every Pokémon whose Ability the simulator knows how to use. */
 export const implementedAbilities = (): string[] => [...ABILITIES.keys()].sort()
@@ -95,7 +95,7 @@ const inPlayCards = (state: SimState): InPlay[] =>
   state.active ? [state.active, ...state.bench] : state.bench
 
 const hasInPlay = (state: SimState, name: string) =>
-  inPlayCards(state).some((slot) => norm(cardName(slot.card)) === norm(name))
+  inPlayCards(state).some((slot) => nameOf(slot.card) === norm(name))
 
 const holdsEnergy = (state: SimState, type: string) =>
   state.hand.some((card) => isBasicEnergy(card) && energyType(card) === type)
@@ -105,14 +105,14 @@ function spend(state: SimState, target: number): SimState {
   const next = cloneState(state)
   const slot = slotAt(next, target)!
   if (abilityOf(slot.card)?.perCopy) slot.usedAbility = true
-  else next.usedAbilities = [...next.usedAbilities, norm(cardName(slot.card))]
+  else next.usedAbilities = [...next.usedAbilities, nameOf(slot.card)]
   return next
 }
 
 const spent = (state: SimState, slot: InPlay) =>
   abilityOf(slot.card)?.perCopy
     ? slot.usedAbility === true
-    : state.usedAbilities.includes(norm(cardName(slot.card)))
+    : state.usedAbilities.includes(nameOf(slot.card))
 
 /** Pull one named card out of the deck and into hand. */
 function fetch(state: SimState, card: DeckCard): SimState {
@@ -216,7 +216,10 @@ interface EnginePiece {
  * fetch, which a draw of 2 does not repay.
  */
 function liveEngines(state: SimState): EnginePiece[][] {
-  const named = (name: string) => (card: DeckCard) => norm(cardName(card)) === norm(name)
+  const named = (name: string) => {
+    const wanted = norm(name)
+    return (card: DeckCard) => nameOf(card) === wanted
+  }
   const pokemonPiece = (name: string): EnginePiece => {
     const is = named(name)
     const inPlayNow = inPlayCards(state).some((slot) => is(slot.card))
@@ -372,7 +375,7 @@ register("Erika's Tangela", {
   ability: 'Gathering of Blossoms',
   apply: (state, _target, ctx) => {
     const erikas = state.deck.filter(
-      (card) => card.tags.includes('pokemon') && norm(cardName(card)).startsWith('erikas '),
+      (card) => card.tags.includes('pokemon') && nameOf(card).startsWith('erikas '),
     )
     const wanted = erikas.filter((card) => ctx.relevant.has(card.key))
     const found = distinct(wanted.length > 0 ? wanted : erikas)
@@ -520,6 +523,6 @@ register('Pecharunt ex', {
 function isDarkSwitchTarget(slot: InPlay): boolean {
   return (
     (slot.card.card?.type ?? '').includes('{D}') &&
-    norm(cardName(slot.card)) !== norm('Pecharunt ex')
+    nameOf(slot.card) !== norm('Pecharunt ex')
   )
 }

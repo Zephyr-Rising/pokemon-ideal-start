@@ -33,7 +33,11 @@ export interface SearchOptions {
   maxNodes?: number
 }
 
-const DEFAULT_MAX_NODES = 1_500
+/**
+ * Measured on the benchmark (`npm run bench`): at 3,000 a turn-1 search almost
+ * never runs out, and turn-1 results are identical from 1,500 to 6,000.
+ */
+const DEFAULT_MAX_NODES = 3_000
 
 /**
  * How far a board is set up toward a goal it has not met yet, for breaking
@@ -57,6 +61,15 @@ export function setupScore(state: SimState, ctx: ActionContext): number {
     if (abilityOf(slot.card)?.draws || abilityOf(slot.card)?.engine) score += 4
   }
   return score + state.hand.length * 0.5
+}
+
+/** One play in a line: what was done, and the boards either side of it. */
+interface Step {
+  action: Action
+  before: SimState
+  after: SimState
+  /** The play before it, or null for the first. */
+  previous: Step | null
 }
 
 /** Strict beats non-strict; otherwise more of the goal met wins. */
@@ -93,19 +106,17 @@ export function searchBestLine(
 
   let best = scoreBoard(goal, toBoardView(start), labelFor)
   let bestSetup = ctx.multiTurn ? setupScore(start, ctx) : 0
-  let bestLine: Action[] = []
-  let bestSteps: string[] = []
-  let bestFrames: SimState[] = []
+  // Assigned inside `visit`, which TypeScript cannot see from here.
+  let bestNode = null as Step | null
   let bestState = start
   let nodes = 0
   let exhausted = true
 
-  const visit = (
-    state: SimState,
-    line: Action[],
-    steps: string[],
-    frames: SimState[],
-  ): void => {
+  // Each visited board remembers only the play that made it and the board it
+  // came from. The line, its readable steps and its frames are rebuilt for the
+  // winning board alone once the search is over: describing every play the
+  // search merely tried was a sizeable share of its time.
+  const visit = (state: SimState, step: Step | null): void => {
     if (best.strict) return
     if (nodes >= maxNodes) {
       exhausted = false
@@ -122,9 +133,7 @@ export function searchBestLine(
     if (better(score, best) || (ctx.multiTurn && ties(score, best) && setup > bestSetup)) {
       best = score
       bestSetup = setup
-      bestLine = line
-      bestSteps = steps
-      bestFrames = frames
+      bestNode = step
       bestState = state
     }
     // Nothing further can improve on a board that already meets the goal.
@@ -134,23 +143,21 @@ export function searchBestLine(
       // Ending the turn adds no board; this state has already been scored.
       if (action.kind === 'end') continue
       for (const next of applyAction(state, action, ctx)) {
-        visit(
-          next,
-          [...line, action],
-          [...steps, describeStep(state, next, action)],
-          [...frames, next],
-        )
+        visit(next, { action, before: state, after: next, previous: step })
         if (best.strict) return
       }
     }
   }
 
-  visit(start, [], [], [])
+  visit(start, null)
+
+  const chain: Step[] = []
+  for (let step: Step | null = bestNode; step; step = step.previous) chain.unshift(step)
   return {
     score: best,
-    line: bestLine,
-    steps: bestSteps,
-    frames: bestFrames,
+    line: chain.map((step) => step.action),
+    steps: chain.map((step) => describeStep(step.before, step.after, step.action)),
+    frames: chain.map((step) => step.after),
     finalState: bestState,
     nodes,
     exhausted,

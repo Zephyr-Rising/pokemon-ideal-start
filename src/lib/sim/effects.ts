@@ -6,6 +6,7 @@ import { distinctCards, supporterChoices, takeFromTop, topOf } from './deck-look
 import {
   benchCap,
   cardName,
+  nameOf,
   cloneState,
   energyType,
   evolveSlot,
@@ -73,7 +74,7 @@ export function registerEffect(name: string, effect: CardEffect): void {
 }
 
 export function lookupEffect(card: DeckCard): CardEffect | undefined {
-  return EFFECTS.get(norm(cardName(card)))
+  return EFFECTS.get(nameOf(card))
 }
 
 export const isImplemented = (card: DeckCard): boolean => lookupEffect(card) !== undefined
@@ -257,7 +258,7 @@ registerEffect('Rare Candy', (state, ctx) => {
     const seen = new Set<string>()
     for (const { slot, target } of slots) {
       if (slot.fresh || !isBasicPokemon(slot.card) || seen.has(slot.card.key)) continue
-      if (norm(cardName(slot.card)) !== basic) continue
+      if (nameOf(slot.card) !== basic) continue
       seen.add(slot.card.key)
       const next = cloneState(state)
       removeFirst(next.hand, stage2)

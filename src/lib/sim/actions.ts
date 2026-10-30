@@ -12,7 +12,7 @@ import { lookupEffect, type EffectContext } from './effects'
 import {
   ACTIVE_TARGET,
   benchCap,
-  cardName,
+  nameOf,
   cloneState,
   energyType,
   evolveSlot,
@@ -73,10 +73,10 @@ const AREA_ZERO = norm('Area Zero Underdepths')
  */
 const stadiumWorthPlaying = (card: DeckCard, ctx: ActionContext, state: SimState): boolean =>
   ctx.relevant.has(card.key) ||
-  (ctx.wantsAnyBench && norm(cardName(card)) === AREA_ZERO) ||
+  (ctx.wantsAnyBench && nameOf(card) === AREA_ZERO) ||
   // Forest of Vitality only matters from turn 2, and only for a goal that
   // wants a Grass Pokémon evolved.
-  (norm(cardName(card)) === FOREST && (state.turn ?? 1) >= 2 && ctx.wantsGrassEvolution === true)
+  (nameOf(card) === FOREST && (state.turn ?? 1) >= 2 && ctx.wantsGrassEvolution === true)
 
 const FOREST = norm('Forest of Vitality')
 
@@ -97,7 +97,7 @@ function benchWorthwhile(state: SimState, ctx: ActionContext): (card: DeckCard) 
     forEngine(card) ||
     // Looking past this turn, a Basic that evolves into a draw engine is a
     // play in progress (Dunsparce, N's Zorua).
-    (ctx.multiTurn === true && ctx.drawEvolutionBases?.has(norm(cardName(card))) === true) ||
+    (ctx.multiTurn === true && ctx.drawEvolutionBases?.has(nameOf(card)) === true) ||
     (ctx.activeKey !== null && abilityOf(card)?.switchesActive === true)
 }
 
@@ -203,7 +203,7 @@ export function legalActions(state: SimState, ctx: ActionContext): Action[] {
     if (!isTool(card) || seenTool.has(card.key)) return
     // A Tool is only worth attaching if the goal asked for it, or if it frees a
     // retreat the goal needs.
-    const freesRetreat = ctx.activeKey !== null && norm(cardName(card)) === norm('Air Balloon')
+    const freesRetreat = ctx.activeKey !== null && nameOf(card) === norm('Air Balloon')
     if (!ctx.relevant.has(card.key) && !freesRetreat) return
     seenTool.add(card.key)
     for (const target of targets(state)) {
@@ -228,7 +228,7 @@ export function legalActions(state: SimState, ctx: ActionContext): Action[] {
       actions.push({ kind: 'playSupporter', handIndex })
     } else if (isStadium(card) && !state.usedStadium && stadiumWorthPlaying(card, ctx, state)) {
       // A Stadium with the same name as the one already out cannot be played.
-      const sameName = state.stadium !== null && norm(cardName(state.stadium)) === norm(cardName(card))
+      const sameName = state.stadium !== null && nameOf(state.stadium) === nameOf(card)
       if (!sameName) {
         seenPlay.add(card.key)
         actions.push({ kind: 'playStadium', handIndex })

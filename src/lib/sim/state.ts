@@ -73,6 +73,25 @@ export const inPlay = (card: DeckCard): InPlay => ({ card, energy: [], tools: []
 export const cardName = (card: DeckCard): string =>
   card.card?.name ?? card.resolvedName ?? card.label
 
+/**
+ * The card's canonical name, normalised for matching, cached on the card.
+ *
+ * Rules and effects compare names constantly — every Ability lookup, every
+ * engine check scanning the deck — so normalising on each comparison was a
+ * large share of a search. Copies of a card share one object, so the cache
+ * almost always hits.
+ */
+export function nameOf(card: DeckCard): string {
+  let name = namesByCard.get(card)
+  if (name === undefined) {
+    name = norm(cardName(card))
+    namesByCard.set(card, name)
+  }
+  return name
+}
+
+const namesByCard = new WeakMap<DeckCard, string>()
+
 export const allInPlay = (state: SimState): InPlay[] =>
   state.active ? [state.active, ...state.bench] : [...state.bench]
 
@@ -86,7 +105,7 @@ export const allInPlay = (state: SimState): InPlay[] =>
  * understate the cap rather than overstate it.
  */
 export function benchCap(state: SimState): number {
-  if (!state.stadium || norm(cardName(state.stadium)) !== AREA_ZERO) {
+  if (!state.stadium || nameOf(state.stadium) !== AREA_ZERO) {
     return BASE_BENCH
   }
   const hasTera = allInPlay(state).some((slot) => slot.card.tags.includes('tera'))
@@ -115,12 +134,12 @@ const SKYLINER = norm('Latias ex')
  * Active it wants.
  */
 export function retreatCost(state: SimState, slot: InPlay): number {
-  if (isBasicPokemon(slot.card) && allInPlay(state).some((s) => norm(cardName(s.card)) === SKYLINER)) {
+  if (isBasicPokemon(slot.card) && allInPlay(state).some((s) => nameOf(s.card) === SKYLINER)) {
     return 0
   }
   const base = slot.card.card?.retreat ?? 0
   // Air Balloon is the only retreat reducer in the current pool.
-  const reduction = slot.tools.some((t) => norm(cardName(t)) === norm('Air Balloon')) ? 2 : 0
+  const reduction = slot.tools.some((t) => nameOf(t) === norm('Air Balloon')) ? 2 : 0
   return Math.max(0, base - reduction)
 }
 
@@ -185,21 +204,59 @@ export function cloneState(state: SimState): SimState {
  */
 export function signature(state: SimState): string {
   const slot = (s: InPlay) =>
-    `${s.card.key}+${s.energy.map(energyType).sort().join('')}+${s.tools.map((t) => t.key).sort().join('')}${s.fresh ? '*' : ''}${s.usedAbility ? '!' : ''}`
-  const flags = [state.usedEnergy, state.usedSupporter, state.usedStadium, state.usedRetreat]
-    .map((f) => (f ? '1' : '0'))
-    .join('')
+    `${idOf(s.card)}+${s.energy.map(energyType).sort().join("")}+${sortedIds(s.tools)}${s.fresh ? '*' : ''}${s.usedAbility ? '!' : ''}`
+  const flags =
+    (state.usedEnergy ? 1 : 0) |
+    (state.usedSupporter ? 2 : 0) |
+    (state.usedStadium ? 4 : 0) |
+    (state.usedRetreat ? 8 : 0)
+  let top = ''
+  for (let i = 0; i < 8 && i < state.deck.length; i++) top += `${idOf(state.deck[i])},`
   return [
-    state.hand.map((c) => c.key).sort().join(','),
+    sortedIds(state.hand),
     state.active ? slot(state.active) : '-',
     state.bench.map(slot).sort().join(','),
-    state.stadium?.key ?? '-',
-    state.deck.slice(0, 8).map((c) => c.key).join(','),
+    state.stadium ? idOf(state.stadium) : '-',
+    top,
     state.deck.length,
     flags,
-    [...state.usedAbilities].sort().join(','),
+    state.usedAbilities.length > 1 ? [...state.usedAbilities].sort().join(',') : state.usedAbilities.join(''),
     state.turn ?? 1,
   ].join('|')
+}
+
+/**
+ * A small number per distinct card, for building signatures quickly.
+ *
+ * Signatures are built for every board the search visits, and sorting and
+ * joining card-key strings was the largest single cost left in a search.
+ * Copies of a card share one `DeckCard` object, so the object lookup almost
+ * always hits; the key lookup behind it keeps two objects for the same card
+ * on the same number.
+ */
+const idsByCard = new WeakMap<DeckCard, number>()
+const idsByKey = new Map<string, number>()
+
+function idOf(card: DeckCard): number {
+  let id = idsByCard.get(card)
+  if (id === undefined) {
+    id = idsByKey.get(card.key)
+    if (id === undefined) {
+      id = idsByKey.size
+      idsByKey.set(card.key, id)
+    }
+    idsByCard.set(card, id)
+  }
+  return id
+}
+
+/** Card ids in ascending order, joined: an order-insensitive key for a pile. */
+function sortedIds(cards: DeckCard[]): string {
+  if (cards.length === 0) return ''
+  if (cards.length === 1) return String(idOf(cards[0]))
+  const ids = new Int32Array(cards.length)
+  for (let i = 0; i < cards.length; i++) ids[i] = idOf(cards[i])
+  return ids.sort().join(',')
 }
 
 // --- turns and evolution -----------------------------------------------------
@@ -208,7 +265,7 @@ const FOREST_OF_VITALITY = norm('Forest of Vitality')
 
 /** Does `evolution` evolve from the Pokémon `from`, by the card's own text? */
 export const evolvesFrom = (evolution: DeckCard, from: DeckCard): boolean =>
-  (evolution.card?.prev ?? '') !== '' && norm(evolution.card!.prev) === norm(cardName(from))
+  (evolution.card?.prev ?? '') !== '' && norm(evolution.card!.prev) === nameOf(from)
 
 export const isEvolutionCard = (card: DeckCard): boolean =>
   card.tags.includes('stage1') || card.tags.includes('stage2')
@@ -226,7 +283,7 @@ export function mayEvolve(state: SimState, slot: InPlay, evolution: DeckCard): b
   if ((state.turn ?? 1) < 2) return false
   if (!evolvesFrom(evolution, slot.card)) return false
   if (!slot.fresh) return true
-  const forest = state.stadium !== null && norm(cardName(state.stadium)) === FOREST_OF_VITALITY
+  const forest = state.stadium !== null && nameOf(state.stadium) === FOREST_OF_VITALITY
   return forest && isGrass(slot.card) && isGrass(evolution)
 }
 

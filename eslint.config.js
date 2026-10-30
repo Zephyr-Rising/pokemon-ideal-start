@@ -5,7 +5,7 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 
 export default tseslint.config(
-  { ignores: ['dist', 'playwright-report', 'test-results', 'src/data/cards.json'] },
+  { ignores: ['dist', 'playwright-report', 'test-results', '.bench', 'src/data/cards.json'] },
   js.configs.recommended,
   tseslint.configs.recommended,
   {

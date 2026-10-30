@@ -20,7 +20,8 @@
     "fetch:cards": "node scripts/fetch-tcgdex.mjs",
     "e2e": "playwright test",
     "preflight": "node scripts/preflight.mjs",
-    "deploy": "node scripts/deploy-pages.mjs"
+    "deploy": "node scripts/deploy-pages.mjs",
+    "bench": "rolldown scripts/bench.ts --format esm --platform node --file .bench/bench.mjs --log-level warn && node .bench/bench.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

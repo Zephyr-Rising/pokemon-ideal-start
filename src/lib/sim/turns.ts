@@ -24,6 +24,14 @@ export const MAX_TURNS = 6
 
 const DEFAULT_TRIALS = 500
 
+/**
+ * Per-turn search budget. Lower than turn 1's on purpose: measured on the
+ * benchmark, quadrupling it moved the average by about a tenth of a turn while
+ * nearly tripling the time. The extra lines go to turns that cannot finish the
+ * board anyway.
+ */
+const TURN_MAX_NODES = 1_500
+
 export interface TurnsOptions {
   trials?: number
   seed?: number
@@ -206,8 +214,9 @@ export function turnsTest(
     const deal: Deal = { hand: order.slice(0, 7), prizes: order.slice(7, 13), rest: order.slice(13) }
     const ctx: ActionContext = { ...buildContext(goal, rng, seed + trial, cards), multiTurn: true }
 
-    const asFirst = turnsToBuild(deal, goal, ctx, labelFor, options.maxNodes, true)
-    const asSecond = turnsToBuild(deal, goal, ctx, labelFor, options.maxNodes, false)
+    const maxNodes = options.maxNodes ?? TURN_MAX_NODES
+    const asFirst = turnsToBuild(deal, goal, ctx, labelFor, maxNodes, true)
+    const asSecond = turnsToBuild(deal, goal, ctx, labelFor, maxNodes, false)
     first.add(asFirst)
     second.add(asSecond)
     if (asFirst.hitBudget || asSecond.hitBudget) truncated++

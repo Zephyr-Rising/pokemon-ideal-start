@@ -2,7 +2,7 @@ import type { FieldGoal } from '../board/goal'
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
 import { abilityOf } from './abilities'
-import { cardName } from './state'
+import { nameOf } from './state'
 import type { ActionContext } from './actions'
 
 /**
@@ -36,11 +36,11 @@ export function buildContext(
   // benching, fetching and evolving.
   const prevOf = new Map<string, string>()
   for (const card of cards) {
-    if (card.card?.prev) prevOf.set(norm(cardName(card)), norm(card.card.prev))
+    if (card.card?.prev) prevOf.set(nameOf(card), norm(card.card.prev))
   }
   const byName = new Map<string, DeckCard[]>()
   for (const card of cards) {
-    const name = norm(cardName(card))
+    const name = nameOf(card)
     byName.set(name, [...(byName.get(name) ?? []), card])
   }
   // Basics that grow into a draw engine — worth benching when the game runs
