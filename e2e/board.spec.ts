@@ -375,4 +375,15 @@ test('asks for a number of cards in hand', async ({ page }) => {
   await expect(page.getByTestId('board-parts').getByText('5 or more cards in hand').first()).toBeVisible({
     timeout: 60_000,
   })
+
+  // It has a priority too, beside the number, like the bench count.
+  await page.getByRole('button', { name: 'Priority of 5 or more cards in hand' }).click()
+  await page
+    .getByRole('group', { name: 'Choose the priority of 5 or more cards in hand' })
+    .getByRole('button', { name: 'Nice to have' })
+    .click()
+  await expect(page.getByRole('button', { name: 'Priority of 5 or more cards in hand' })).toHaveText(
+    'Nice to have',
+  )
+  await expect(page.getByTestId('partial-success')).toBeVisible({ timeout: 60_000 })
 })

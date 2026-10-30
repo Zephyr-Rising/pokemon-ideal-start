@@ -314,6 +314,13 @@ export function BoardEditor({ cards, goal, onChange, horizon = 'turn1' }: Props)
                   />
                   benched
                 </label>
+                {goal.benchMin > 0 && (
+                  <ConditionPriority
+                    label={`${goal.benchMin} or more benched`}
+                    priority={goal.priorities?.benchMin ?? 1}
+                    onPriority={(level) => onChange(setPartPriority(goal, 'benchMin', level))}
+                  />
+                )}
               </div>
               <Zone id="bench" picked={picked} onPick={place}>
                 <div className="flex flex-wrap items-end gap-2">
@@ -380,6 +387,13 @@ export function BoardEditor({ cards, goal, onChange, horizon = 'turn1' }: Props)
                   />
                   cards
                 </label>
+                {(goal.handMin ?? 0) > 0 && (
+                  <ConditionPriority
+                    label={`${goal.handMin} or more cards in hand`}
+                    priority={goal.priorities?.handMin ?? 1}
+                    onPriority={(level) => onChange(setPartPriority(goal, 'handMin', level))}
+                  />
+                )}
               </div>
               <Zone id="hand" picked={picked} onPick={place}>
                 <div className="flex flex-wrap gap-2">
@@ -992,5 +1006,67 @@ function Choices({
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * The priority of a condition that has no card to tap — "at least N benched",
+ * "at least N cards in hand": a small button naming the current level, which
+ * opens the same three options a card's popover offers.
+ */
+function ConditionPriority({
+  label,
+  priority,
+  onPriority,
+}: {
+  label: string
+  priority: Priority
+  onPriority: (level: Priority) => void
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <span className="relative">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-label={`Priority of ${label}`}
+        onClick={() => setOpen((on) => !on)}
+        className={[
+          'rounded-md border px-1.5 py-0.5 text-xs',
+          priority > 1
+            ? 'border-amber-500 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200'
+            : 'border-slate-300 text-slate-500 dark:border-slate-700',
+        ].join(' ')}
+      >
+        {PRIORITY_LEVELS[priority - 1].label}
+      </button>
+      {open && (
+        <span
+          role="group"
+          aria-label={`Choose the priority of ${label}`}
+          className="absolute top-full right-0 z-30 mt-1 flex gap-1 rounded-lg border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-900"
+        >
+          {PRIORITY_LEVELS.map(({ level, label: name }) => (
+            <button
+              key={level}
+              type="button"
+              aria-pressed={priority === level}
+              onClick={() => {
+                onPriority(level)
+                setOpen(false)
+              }}
+              className={[
+                'rounded-md border px-1.5 py-0.5 text-xs whitespace-nowrap',
+                priority === level
+                  ? 'border-sky-500 bg-sky-50 font-medium text-sky-800 dark:bg-sky-950/40 dark:text-sky-200'
+                  : 'border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800',
+              ].join(' ')}
+            >
+              {name}
+            </button>
+          ))}
+        </span>
+      )}
+    </span>
   )
 }
