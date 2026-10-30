@@ -198,16 +198,17 @@ describe('draw engines', () => {
   it('Ultra Ball keeps the Energy Lunar Cycle is about to discard', () => {
     const lunatone = basic('Lunatone', 110, { type: '{F}' })
     const solrock = basic('Solrock', 110, { type: '{F}' })
-    const board = { active: inPlay(lunatone), bench: [inPlay(solrock)], deck: [basic('x')] }
+    // Something worth fetching, or Ultra Ball would not be played at all.
+    const board = { active: inPlay(lunatone), bench: [inPlay(solrock)], deck: [basic('target')] }
     // The {F} Energy is first in hand, so index order alone would pitch it.
     const s = state({ ...board, hand: [energy('fighting', '{F}'), energy('a'), energy('b')] })
     const [after] = play('Ultra Ball', s, goalOnly)
-    expect(keys(after.hand)).toEqual(['fighting'])
+    expect(keys(after.hand)).toEqual(['fighting', 'target'])
 
     // Once Lunar Cycle is spent the Energy is just another card.
     const spent = state({ ...s, usedAbilities: ['lunatone'] })
     const [afterSpent] = play('Ultra Ball', spent, goalOnly)
-    expect(keys(afterSpent.hand)).toEqual(['b'])
+    expect(keys(afterSpent.hand)).toEqual(['b', 'target'])
   })
 
   it('keeps only one copy of an engine piece', () => {
@@ -217,17 +218,17 @@ describe('draw engines', () => {
       active: inPlay(lunatone),
       bench: [inPlay(solrock)],
       hand: [energy('f1', '{F}'), energy('f2', '{F}'), energy('a')],
-      deck: [basic('x')],
+      deck: [basic('target')],
     })
     const [after] = play('Ultra Ball', s, goalOnly)
-    expect(keys(after.hand)).toEqual(['f1'])
+    expect(keys(after.hand)).toEqual(['f1', 'target'])
   })
 
   it('only protects a piece when the rest of its engine can still be found', () => {
     // A Grass Energy is Teal Dance fuel, but only in a deck that runs Ogerpon.
     const hand = [energy('grass', '{G}'), energy('fire', '{R}'), energy('water', '{W}')]
-    const without = state({ active: inPlay(basic('x')), hand, deck: [basic('y')] })
-    expect(keys(play('Ultra Ball', without, goalOnly)[0].hand)).toEqual(['water'])
+    const without = state({ active: inPlay(basic('x')), hand, deck: [basic('target')] })
+    expect(keys(play('Ultra Ball', without, goalOnly)[0].hand)).toEqual(['water', 'target'])
 
     const withOgerpon = state({ active: inPlay(basic('x')), hand, deck: [ogerpon] })
     const results = play('Ultra Ball', withOgerpon, goalOnly)
@@ -418,7 +419,8 @@ describe('energy', () => {
 describe('switching and recovery', () => {
   it('Switch swaps the Active with a benched Pokémon, free of cost', () => {
     const s = state({ active: inPlay(basic('heavy', 60, { retreat: 4 })), bench: [inPlay(basic('x'))] })
-    const results = play('Switch', s)
+    // Only worth playing to bring in the goal's Active.
+    const results = play('Switch', s, ctx({ activeKey: 'x' }))
     expect(results[0].active!.card.key).toBe('x')
     expect(results[0].bench[0].card.key).toBe('heavy')
   })

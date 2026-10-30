@@ -1,7 +1,6 @@
 import type { DeckCard } from '../types'
 import type { EffectContext } from './effects'
-import { hashString, mulberry32, shuffled } from './rng'
-import { cloneState, signature, type SimState } from './state'
+import { cloneState, fairShuffle, shufflesAfter, type SimState } from './state'
 
 /**
  * Cards that look at only the top of the deck — Pokégear 3.0, Bug Catching
@@ -24,9 +23,8 @@ export function distinctCards(cards: DeckCard[]): DeckCard[] {
 /**
  * Put the chosen cards from the top `count` into hand and shuffle the deck.
  *
- * The shuffle is seeded from the trial and the state it happens in, like every
- * other shuffle in the simulator, so a branch resolves the same way each time
- * the search reaches it.
+ * The shuffle is fair (see `fairShuffle`): a branch resolves the same way each
+ * time the search reaches it, and cannot be re-rolled.
  */
 export function takeFromTop(
   state: SimState,
@@ -42,8 +40,8 @@ export function takeFromTop(
     next.hand.push(top[at])
     top.splice(at, 1)
   }
-  const rng = mulberry32(ctx.seed ^ hashString(signature(state)))
-  next.deck = shuffled([...top, ...next.deck.slice(count)], rng)
+  next.deck = fairShuffle(state, [...top, ...next.deck.slice(count)], ctx.seed)
+  next.shuffles = shufflesAfter(state)
   return next
 }
 

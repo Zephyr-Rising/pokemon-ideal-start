@@ -74,7 +74,8 @@ const ctx: ActionContext = {
   energyTypes: new Set<string>(),
   // Empty means "anywhere will do".
   energyTargets: new Set<string>(),
-  activeKey: 'any',
+  // The retreat tests swap into 'light', which is only worth it as the goal.
+  activeKey: 'light',
   rng: () => 0.5,
   seed: 1,
 }

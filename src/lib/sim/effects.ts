@@ -1,6 +1,5 @@
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
-import { hashString, mulberry32, shuffled } from './rng'
 import { engineKeeps, engineWants, onEvolve } from './abilities'
 import { distinctCards, supporterChoices, takeFromTop, topOf } from './deck-look'
 import {
@@ -10,10 +9,11 @@ import {
   cloneState,
   energyType,
   evolveSlot,
+  fairShuffle,
   inPlay,
   isBasicPokemon,
   isEnergy,
-  signature,
+  shufflesAfter,
   type SimState,
 } from './state'
 
@@ -54,6 +54,11 @@ export interface EffectContext {
   prevOf?: Map<string, string>
   /** The goal wants a Grass evolution, which is what Forest of Vitality helps. */
   wantsGrassEvolution?: boolean
+  /**
+   * The goal's Active and its earlier stages, keyed by card, valued by how many
+   * evolutions short of the goal each is (0 for the goal card itself).
+   */
+  activeLineage?: Map<string, number>
   /** Basics in this deck that evolve into a Pokémon with a draw Ability. */
   drawEvolutionBases?: Set<string>
   /** Playing over several turns, so setting up for a later turn counts. */
@@ -118,7 +123,7 @@ const useful = (card: DeckCard, ctx: EffectContext): boolean => keepRank(card, c
  * has no use for is skipped entirely: it cannot bring the board closer, and
  * branching on it would blow up the tree for nothing.
  */
-function choices(
+export function choices(
   state: SimState,
   pool: DeckCard[],
   allowed: (card: DeckCard) => boolean,
@@ -217,7 +222,8 @@ registerEffect('Ultra Ball', (state, ctx) => {
   const paid = payDiscard(state, 2, ctx)
   if (!paid) return [state]
   const found = choices(paid, paid.deck, isPokemon, ctx)
-  return found.length > 0 ? found.map((card) => fetchToHand(paid, card)) : [paid]
+  // Discarding two to fetch nothing is not a play anyone makes.
+  return found.length > 0 ? found.map((card) => fetchToHand(paid, card)) : [state]
 })
 
 registerEffect('Fighting Gong', (state, ctx) => {
@@ -372,7 +378,7 @@ registerEffect('Secret Box', (state, ctx) => {
     pick((c) => c.tags.includes('supporter')),
     pick((c) => c.tags.includes('stadium')),
   ].filter((c): c is DeckCard => c !== undefined)
-  if (wanted.length === 0) return [paid]
+  if (wanted.length === 0) return [state]
   const next = cloneState(paid)
   for (const card of wanted) {
     removeFirst(next.deck, card)
@@ -386,15 +392,14 @@ registerEffect('Secret Box', (state, ctx) => {
 /**
  * Shuffle the hand back and draw a fresh one.
  *
- * The shuffle is seeded from the trial plus the state it happens in, not from a
- * running stream. That makes a branch resolve the same way every time it is
- * reached, so the search can backtrack through a shuffle without the outcome
- * shifting underneath it — and the whole run stays reproducible.
+ * A fair shuffle (see `fairShuffle`): it resolves the same way every time the
+ * search reaches it, so the search can backtrack through it, but the search
+ * cannot re-roll it by changing something unrelated first.
  */
 function refreshHand(state: SimState, count: number, ctx: EffectContext): SimState {
   const next = cloneState(state)
-  const rng = mulberry32(ctx.seed ^ hashString(signature(state)))
-  next.deck = shuffled([...next.deck, ...next.hand], rng)
+  next.deck = fairShuffle(state, [...next.deck, ...next.hand], ctx.seed)
+  next.shuffles = shufflesAfter(state)
   next.hand = next.deck.splice(0, count)
   return next
 }
@@ -507,12 +512,12 @@ registerEffect('Energy Switch', (state) => {
 
 // --- switching -------------------------------------------------------------
 
-registerEffect('Switch', (state) => {
+registerEffect('Switch', (state, ctx) => {
   if (!state.active || state.bench.length === 0) return [state]
   const seen = new Set<string>()
   const out: SimState[] = []
   state.bench.forEach((slot, index) => {
-    if (seen.has(slot.card.key)) return
+    if (seen.has(slot.card.key) || !worthSwitching(state, slot.card, ctx)) return
     seen.add(slot.card.key)
     const next = cloneState(state)
     const active = next.active!
@@ -520,8 +525,26 @@ registerEffect('Switch', (state) => {
     next.bench[index] = active
     out.push(next)
   })
-  return out
+  return out.length > 0 ? out : [state]
 })
+
+/**
+ * Is bringing this Pokémon Active a step toward the goal's Active?
+ *
+ * Only a Pokémon on the goal Active's own evolution line is worth switching
+ * in, and only one further along it than what is Active now: switching away
+ * from a Dreepy that will become the goal's Dragapult ex, or between two
+ * identical Drakloak, does nothing a player would do.
+ */
+export function worthSwitching(state: SimState, incoming: DeckCard, ctx: EffectContext): boolean {
+  if (ctx.activeKey === null || !state.active) return false
+  // Without the deck's evolution lines to hand, the goal's Active is the line.
+  const lineage = ctx.activeLineage?.size ? ctx.activeLineage : new Map([[ctx.activeKey, 0]])
+  const to = lineage.get(incoming.key)
+  if (to === undefined) return false
+  const from = lineage.get(state.active.card.key)
+  return from === undefined || to < from
+}
 
 // --- recovery --------------------------------------------------------------
 

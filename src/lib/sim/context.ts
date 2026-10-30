@@ -53,6 +53,19 @@ export function buildContext(
     if (base) drawEvolutionBases.add(base)
   }
 
+  // The goal's Active and its earlier stages, by how many evolutions short of
+  // it each is: 0 for the card itself. Retreating only ever moves along this.
+  const activeLineage = new Map<string, number>()
+  if (goal.active) {
+    activeLineage.set(goal.active.cardKey, 0)
+    const top = cards.find((c) => c.key === goal.active!.cardKey)
+    let prev = top?.card?.prev ? norm(top.card.prev) : null
+    for (let steps = 1; prev && steps <= 2; steps++) {
+      for (const earlier of byName.get(prev) ?? []) activeLineage.set(earlier.key, steps)
+      prev = prevOf.get(prev) ?? null
+    }
+  }
+
   let wantsGrassEvolution = false
   for (const key of [...relevant]) {
     const card = cards.find((c) => c.key === key)
@@ -89,6 +102,7 @@ export function buildContext(
     energyTargets,
     activeKey: goal.active?.cardKey ?? null,
     prevOf,
+    activeLineage,
     wantsGrassEvolution,
     drawEvolutionBases,
     rng,

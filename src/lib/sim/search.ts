@@ -40,6 +40,13 @@ export interface SearchOptions {
 const DEFAULT_MAX_NODES = 3_000
 
 /**
+ * Extra boards to look at, once the goal is met, for a shorter way to meet it.
+ * The first winning line found is often padded with plays that did nothing for
+ * it — benching a spare, retreating and back — and a player would not make them.
+ */
+const REFINE_NODES = 400
+
+/**
  * How far a board is set up toward a goal it has not met yet, for breaking
  * ties when play continues past this turn.
  *
@@ -102,39 +109,60 @@ export function searchBestLine(
   options: SearchOptions = {},
 ): SearchResult {
   const maxNodes = options.maxNodes ?? DEFAULT_MAX_NODES
-  const seen = new Set<string>()
+  // The fewest plays each board has been reached in, so a shorter way to a
+  // board already seen can still be followed.
+  const seen = new Map<string, number>()
 
   let best = scoreBoard(goal, toBoardView(start), labelFor)
   let bestSetup = ctx.multiTurn ? setupScore(start, ctx) : 0
   // Assigned inside `visit`, which TypeScript cannot see from here.
   let bestNode = null as Step | null
   let bestState = start
+  let bestDepth = 0
   let nodes = 0
   let exhausted = true
+  // Once the goal is met, the search spends a little more looking for a
+  // shorter way to meet it, and stops there. Null until then.
+  let refineUntil: number | null = null
 
   // Each visited board remembers only the play that made it and the board it
   // came from. The line, its readable steps and its frames are rebuilt for the
   // winning board alone once the search is over: describing every play the
   // search merely tried was a sizeable share of its time.
-  const visit = (state: SimState, step: Step | null): void => {
-    if (best.strict) return
-    if (nodes >= maxNodes) {
+  const done = () => refineUntil !== null && nodes >= refineUntil
+
+  const visit = (state: SimState, step: Step | null, depth: number): void => {
+    if (done()) return
+    // With the goal met, only a strictly shorter line is worth finding.
+    if (best.strict && depth >= bestDepth) return
+    if (nodes >= maxNodes && !best.strict) {
       exhausted = false
       return
     }
 
     const key = signature(state)
-    if (seen.has(key)) return
-    seen.add(key)
+    const reached = seen.get(key)
+    if (reached !== undefined && reached <= depth) return
+    seen.set(key, depth)
     nodes++
 
     const score = scoreBoard(goal, toBoardView(state), labelFor)
     const setup = ctx.multiTurn ? setupScore(state, ctx) : 0
-    if (better(score, best) || (ctx.multiTurn && ties(score, best) && setup > bestSetup)) {
+    const tie = ties(score, best) && (!ctx.multiTurn || setup === bestSetup)
+    if (
+      better(score, best) ||
+      (ctx.multiTurn && ties(score, best) && setup > bestSetup) ||
+      // As good, in fewer plays: the line a player would actually choose.
+      (tie && depth < bestDepth)
+    ) {
+      // Refining may run past the budget: the budget bounds finding the goal,
+      // and a line padded with pointless plays is worth the small extra.
+      if (score.strict && !best.strict) refineUntil = nodes + REFINE_NODES
       best = score
       bestSetup = setup
       bestNode = step
       bestState = state
+      bestDepth = depth
     }
     // Nothing further can improve on a board that already meets the goal.
     if (score.strict) return
@@ -143,13 +171,13 @@ export function searchBestLine(
       // Ending the turn adds no board; this state has already been scored.
       if (action.kind === 'end') continue
       for (const next of applyAction(state, action, ctx)) {
-        visit(next, { action, before: state, after: next, previous: step })
-        if (best.strict) return
+        visit(next, { action, before: state, after: next, previous: step }, depth + 1)
+        if (done()) return
       }
     }
   }
 
-  visit(start, null)
+  visit(start, null, 0)
 
   const chain: Step[] = []
   for (let step: Step | null = bestNode; step; step = step.previous) chain.unshift(step)

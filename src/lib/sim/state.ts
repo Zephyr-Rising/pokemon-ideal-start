@@ -1,6 +1,7 @@
 import type { BoardView } from '../board/goal'
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
+import { hashString, mulberry32, shuffled } from './rng'
 
 /**
  * Turn-1 game state for one player.
@@ -52,6 +53,8 @@ export interface SimState {
    * turn-1 playtest ever runs. Nothing evolves on a player's first turn.
    */
   turn?: number
+  /** Shuffles so far this game, which picks the next shuffle's order. */
+  shuffles?: number
 }
 
 /** Target index convention: -1 is the Active Spot, 0+ indexes the bench. */
@@ -191,6 +194,7 @@ export function cloneState(state: SimState): SimState {
     usedRetreat: state.usedRetreat,
     usedAbilities: state.usedAbilities,
     turn: state.turn,
+    shuffles: state.shuffles,
   }
 }
 
@@ -222,8 +226,32 @@ export function signature(state: SimState): string {
     flags,
     state.usedAbilities.length > 1 ? [...state.usedAbilities].sort().join(',') : state.usedAbilities.join(''),
     state.turn ?? 1,
+    state.shuffles ?? 0,
   ].join('|')
 }
+
+/**
+ * Shuffle a pile of cards the way a fair game would: the order that comes out
+ * depends on the trial, on which shuffle of the game this is, and on which
+ * cards went in — and on nothing else.
+ *
+ * It used to be seeded from the whole board, which let the search re-roll a
+ * shuffle: benching in a different order, or playing a card that did nothing,
+ * gave Lillie's Determination a fresh draw, and across thousands of lines the
+ * search kept whichever drew best. A player gets one shuffle. Sorting the pile
+ * first means the same cards in give the same order out, however they got
+ * there, so the only choice left to the search is the real one: what to put
+ * into the pile.
+ *
+ * Callers record the shuffle with `next.shuffles = shufflesAfter(state)`.
+ */
+export function fairShuffle(state: SimState, pile: DeckCard[], seed: number): DeckCard[] {
+  const sorted = [...pile].sort((a, b) => idOf(a) - idOf(b))
+  const rng = mulberry32(seed ^ hashString(`${state.turn ?? 1}:${state.shuffles ?? 0}`))
+  return shuffled(sorted, rng)
+}
+
+export const shufflesAfter = (state: SimState): number => (state.shuffles ?? 0) + 1
 
 /**
  * A small number per distinct card, for building signatures quickly.

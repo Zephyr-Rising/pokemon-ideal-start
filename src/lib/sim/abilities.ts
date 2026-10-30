@@ -1,15 +1,15 @@
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
 import { supporterChoices, takeFromTop } from './deck-look'
-import { payDiscard, type EffectContext } from './effects'
-import { hashString, mulberry32, shuffled } from './rng'
+import { choices, payDiscard, type EffectContext } from './effects'
 import {
   ACTIVE_TARGET,
   benchCap,
   nameOf,
   cloneState,
   energyType,
-  signature,
+  fairShuffle,
+  shufflesAfter,
   type InPlay,
   type SimState,
 } from './state'
@@ -433,9 +433,9 @@ register('Dudunsparce', {
     const drawn = drawInto(state, 3)
     const leaving = slotAt(drawn, target)!
     const returned = [leaving.card, ...leaving.energy, ...leaving.tools]
-    const rng = mulberry32(ctx.seed ^ hashString(signature(state)))
     const shuffleBack = (next: SimState) => {
-      next.deck = shuffled([...next.deck, ...returned], rng)
+      next.deck = fairShuffle(state, [...next.deck, ...returned], ctx.seed)
+      next.shuffles = shufflesAfter(state)
       return next
     }
     if (target !== ACTIVE_TARGET) {
@@ -470,6 +470,36 @@ register("N's Zoroark ex", {
     return paid ? [drawInto(paid, 2)] : [state]
   },
 })
+
+// "Once during your turn, if your Active Pokémon has the Festival Lead Ability,
+// you may search your deck for a card and put it into your hand. Then, shuffle
+// your deck." Dipplin, Seaking, Goldeen and Swirlix carry Festival Lead.
+register('Thwackey', {
+  ability: 'Boom Boom Groove',
+  perCopy: true,
+  draws: true,
+  usable: (state) =>
+    state.active !== null && hasAbilityNamed(state.active.card, 'Festival Lead') && state.deck.length > 0,
+  apply: (state, _target, ctx) => {
+    // Any card at all, so the choice is narrowed the way every search is: what
+    // the goal wants or an engine needs, else a Supporter still to be played.
+    let found = choices(state, state.deck, () => true, ctx)
+    if (found.length === 0 && !state.usedSupporter) {
+      found = distinct(state.deck.filter((card) => card.tags.includes('supporter')))
+    }
+    // Searching for nothing is not a play.
+    return found.map((card) => {
+      const next = fetch(state, card)
+      next.deck = fairShuffle(next, next.deck, ctx.seed)
+      next.shuffles = shufflesAfter(next)
+      return next
+    })
+  },
+})
+
+/** Does this card carry an Ability of this name, by its printed text? */
+const hasAbilityNamed = (card: DeckCard, name: string): boolean =>
+  (card.card?.moves ?? []).some((move) => move.name === `[Ability] ${name}`)
 
 // "Once during your turn, when you play this Pokémon from your hand to evolve 1
 // of your Pokémon, you may use this Ability. Draw 2 cards." (Kadabra) and

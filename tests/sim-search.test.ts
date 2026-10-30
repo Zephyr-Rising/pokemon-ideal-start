@@ -89,12 +89,20 @@ describe('reachability', () => {
   })
 
   it('retreats to put the goal Pokémon in the Active Spot', () => {
-    // Dreepy must start on the bench (budew is the only other Basic), so the
-    // only route is to bench dreepy and retreat into it.
+    // Budew is already Active, so the only route is to bench Dreepy and
+    // retreat into it.
+    const s = state({ active: inPlay(basic('budew')), hand: [basic('dreepy')] })
+    const result = run(s, goal({ active: slot('a', 'dreepy'), bench: [slot('b', 'budew')] }))
+    expect(result.score.strict).toBe(true)
+    expect(result.line.map((a) => a.kind)).toEqual(['bench', 'retreat'])
+  })
+
+  it('starts with the goal Pokémon rather than retreating into it', () => {
+    // Either opening reaches the board; starting with Dreepy takes fewer plays.
     const s = state({ hand: [basic('budew'), basic('dreepy')] })
     const result = run(s, goal({ active: slot('a', 'dreepy'), bench: [slot('b', 'budew')] }))
     expect(result.score.strict).toBe(true)
-    expect(result.line.map((a) => a.kind)).toContain('retreat')
+    expect(result.line.map((a) => a.kind)).toEqual(['placeActive', 'bench'])
   })
 
   it('cannot swap the Active when the retreat cost is unpayable', () => {

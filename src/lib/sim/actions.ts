@@ -8,7 +8,7 @@ import {
   onEvolve,
   useAbility,
 } from './abilities'
-import { lookupEffect, type EffectContext } from './effects'
+import { lookupEffect, worthSwitching, type EffectContext } from './effects'
 import {
   ACTIVE_TARGET,
   benchCap,
@@ -108,7 +108,7 @@ function benchWorthwhile(state: SimState, ctx: ActionContext): (card: DeckCard) 
 function needsRetreatEnergy(state: SimState, ctx: ActionContext): boolean {
   const active = state.active
   if (ctx.activeKey === null || !active || state.usedRetreat) return false
-  if (active.card.key === ctx.activeKey) return false
+  if (!state.bench.some((slot) => worthSwitching(state, slot.card, ctx))) return false
   return active.energy.length < retreatCost(state, active)
 }
 
@@ -236,14 +236,14 @@ export function legalActions(state: SimState, ctx: ActionContext): Action[] {
     }
   })
 
-  // Retreating only changes which Pokémon is Active, so it is pointless unless
-  // the goal names one.
+  // Retreating only changes which Pokémon is Active, so it is only worth it
+  // into one further along the goal Active's evolution line.
   if (ctx.activeKey !== null && !state.usedRetreat && state.bench.length > 0 && state.active) {
     const cost = retreatCost(state, state.active)
     if (state.active.energy.length >= cost) {
       const seenTarget = new Set<string>()
       state.bench.forEach((slot, benchIndex) => {
-        if (seenTarget.has(slot.card.key)) return
+        if (seenTarget.has(slot.card.key) || !worthSwitching(state, slot.card, ctx)) return
         seenTarget.add(slot.card.key)
         actions.push({ kind: 'retreat', benchIndex })
       })
@@ -327,7 +327,9 @@ export function applyAction(state: SimState, action: Action, ctx: ActionContext)
       base.hand.splice(action.handIndex, 1)
       base.discard.push(card)
       if (action.kind === 'playSupporter') base.usedSupporter = true
-      return effect ? effect(base, ctx) : [base]
+      // A card whose effect changed nothing was spent for nothing; that is not
+      // a play, so it leads nowhere.
+      return effect ? effect(base, ctx).filter((next) => next !== base) : []
     }
 
     case 'retreat': {

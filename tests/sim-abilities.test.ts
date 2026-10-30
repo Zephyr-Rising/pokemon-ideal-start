@@ -374,3 +374,42 @@ describe('Abilities of evolved Pokémon', () => {
     expect(abilityAvailable(s, ACTIVE_TARGET)).toBe(false)
   })
 })
+
+describe('Boom Boom Groove (Thwackey)', () => {
+  const festivalLead = { name: '[Ability] Festival Lead', cost: '', damage: '', effect: '' }
+  const dipplin = card('dipplin', ['pokemon', 'stage1'], { name: 'Dipplin', moves: [festivalLead] })
+  const thwackey = card('thwackey', ['pokemon', 'stage1'], { name: 'Thwackey', prev: 'Grookey' })
+  const target = card('target', ['item'], { name: 'target' })
+  const wanted = ctx({ relevant: new Set(['target']) })
+
+  it('needs a Festival Lead Pokémon in the Active Spot', () => {
+    const without = state({ active: inPlay(mon('x')), bench: [inPlay(thwackey)], deck: [target] })
+    expect(abilityAvailable(without, 0)).toBe(false)
+    const withLead = state({ active: inPlay(dipplin), bench: [inPlay(thwackey)], deck: [target] })
+    expect(abilityAvailable(withLead, 0)).toBe(true)
+  })
+
+  it('searches the whole deck for what the board wants, then shuffles', () => {
+    const s = state({ active: inPlay(dipplin), bench: [inPlay(thwackey)], deck: [...deckOf(30), target] })
+    const results = useAbility(s, 0, wanted)
+    expect(results.map((r) => r.hand.map((c) => c.key))).toEqual([['target']])
+    expect(results[0].deck).toHaveLength(30)
+    expect(results[0].shuffles).toBe(1)
+  })
+
+  it('each Thwackey has its own', () => {
+    const s = state({
+      active: inPlay(dipplin),
+      bench: [inPlay(thwackey), inPlay(thwackey)],
+      deck: [target, target],
+    })
+    const [after] = useAbility(s, 0, wanted)
+    expect(abilityAvailable(after, 0)).toBe(false)
+    expect(abilityAvailable(after, 1)).toBe(true)
+  })
+
+  it('is not a play when there is nothing worth taking', () => {
+    const s = state({ active: inPlay(dipplin), bench: [inPlay(thwackey)], deck: deckOf(5), usedSupporter: true })
+    expect(useAbility(s, 0, ctx({ wantsAnyBench: false, wantsEnergy: false }))).toEqual([])
+  })
+})

@@ -347,7 +347,13 @@ export function playDeal(
   let finalState: SimState | null = null
   let hitBudget = false
 
-  for (const handIndex of starters.values()) {
+  // The goal's own Active first, then the stages before it, then the rest:
+  // the first opening that builds the board is the one kept, and it should be
+  // the one a player would choose.
+  const rank = (handIndex: number) => ctx.activeLineage?.get(hand[handIndex].key) ?? Infinity
+  const openings = [...starters.values()].sort((a, b) => rank(a) - rank(b))
+
+  for (const handIndex of openings) {
     const placed: SimState = {
       hand: hand.filter((_, i) => i !== handIndex),
       deck: rest,
