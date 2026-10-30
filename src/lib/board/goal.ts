@@ -167,11 +167,28 @@ const ENERGY_NAMES: Record<string, string> = {
  * dropped where it can be, as "1 Grass Energy" reads worse than the card's own
  * name.
  */
-export function energyPhrase(slot: Pick<SlotGoal, 'energy'>): string {
+export function energyPhrase(
+  slot: Pick<SlotGoal, 'energy'>,
+  labelFor: (cardKey: string) => string = (key) => key,
+): string {
   const counts = new Map<string, number>()
+  const special = new Set<string>()
   for (const type of slot.energy) {
-    const name = type === null ? 'any' : (ENERGY_NAMES[type] ?? type)
+    // A Special Energy is stored as its card key and named after the card.
+    const basic = type === null ? 'any' : ENERGY_NAMES[type]
+    const name = basic ?? labelFor(type!)
+    if (!basic) special.add(name)
     counts.set(name, (counts.get(name) ?? 0) + 1)
+  }
+  if (special.size > 0) {
+    // Special Energy names already end in "Energy", so each part says so.
+    return [...counts]
+      .sort(([a], [b]) => Number(a === 'any') - Number(b === 'any'))
+      .map(([name, n]) => {
+        const named = special.has(name) ? name : name === 'any' ? 'Energy of any type' : `${name} Energy`
+        return n === 1 && name !== 'any' ? named : `${n} ${named}`
+      })
+      .join(' + ')
   }
   // Typed Energy first, "any" last, as it is the leftover.
   const groups = [...counts].sort(([a], [b]) => Number(a === 'any') - Number(b === 'any'))
@@ -231,7 +248,7 @@ export function scoreBoard(
       parts.push({
         id: `${goal.active.id}:energy`,
         kind: 'activeEnergy',
-        label: `${energyPhrase(goal.active)} on the Active`,
+        label: `${energyPhrase(goal.active, labelFor)} on the Active`,
         // Energy only counts on the Pokémon the goal actually asked for.
         met: matches && energyMet(board.active ?? undefined, goal.active),
       })
@@ -262,7 +279,7 @@ export function scoreBoard(
       parts.push({
         id: `${slot.id}:energy`,
         kind: 'benchEnergy',
-        label: `${energyPhrase(slot)} on ${name}`,
+        label: `${energyPhrase(slot, labelFor)} on ${name}`,
         met: energyMet(pokemon, slot),
       })
     }

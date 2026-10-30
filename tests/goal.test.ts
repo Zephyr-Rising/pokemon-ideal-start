@@ -261,3 +261,36 @@ describe('part labels', () => {
     expect(labels).toContain('budew benched')
   })
 })
+
+describe('Special Energy', () => {
+  // A Special Energy is asked for by its own card key, not as "any" Energy.
+  const mist = 'id:mist'
+  const labels = (key: string) => (key === mist ? 'Mist Energy' : key)
+  const g = goal({ active: { id: 'a', cardKey: 'dreepy', energy: [mist], tools: [] } })
+  const met = (energy: string[]) =>
+    scoreBoard(g, { active: { cardKey: 'dreepy', energy, tools: [] }, bench: [], stadiumKey: null, hand: [] }, labels)
+      .parts.find((p) => p.id.endsWith(':energy'))!.met
+
+  it('is met only by that card', () => {
+    expect(met([mist])).toBe(true)
+    expect(met(['{P}'])).toBe(false)
+  })
+
+  it('is named after the card', () => {
+    expect(energyPhrase({ energy: [mist] }, labels)).toBe('Mist Energy')
+    expect(energyPhrase({ energy: [mist, mist] }, labels)).toBe('2 Mist Energy')
+    expect(energyPhrase({ energy: ['{P}', mist, null] }, labels)).toBe(
+      'Psychic Energy + Mist Energy + 1 Energy of any type',
+    )
+  })
+
+  it('still counts toward an "any" requirement once attached', () => {
+    const anyGoal = goal({ active: { id: 'a', cardKey: 'dreepy', energy: [null], tools: [] } })
+    const score = scoreBoard(
+      anyGoal,
+      { active: { cardKey: 'dreepy', energy: [mist], tools: [] }, bench: [], stadiumKey: null, hand: [] },
+      labels,
+    )
+    expect(score.strict).toBe(true)
+  })
+})

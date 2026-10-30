@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+
 import { expect, test, type Page } from '@playwright/test'
 
 const CARD_IMAGE_HOST = 'assets.tcgdex.net'
@@ -232,4 +234,19 @@ test('shows how many turns a board takes, in its own tab', async ({ page }) => {
   // Switching tabs keeps the board.
   await page.getByRole('tab', { name: 'Turn 1 board' }).click()
   await expect(page.getByRole('button', { name: 'Remove Mega Kangaskhan ex' })).toBeVisible()
+})
+
+test('keeps a Special Energy as itself, not "any" Energy', async ({ page }) => {
+  await stubCardArt(page)
+  await page.goto('./')
+  const list = readFileSync('tests/fixtures/alakazam.txt', 'utf8')
+  await page.getByRole('textbox').first().fill(list)
+  await page.getByRole('tab', { name: 'Turn 1 board' }).click()
+  await page.getByRole('button', { name: 'Pick Abra' }).click()
+  await page.getByRole('button', { name: 'Place in Active spot' }).click()
+  await page.getByRole('button', { name: 'Pick Mist Energy' }).click()
+  await page.getByRole('button', { name: 'Attach to Abra' }).click()
+
+  await expect(page.getByRole('button', { name: 'Remove one Mist Energy from Abra' })).toHaveCount(1)
+  await expect(page.getByRole('button', { name: /Remove one Any Energy/ })).toHaveCount(0)
 })

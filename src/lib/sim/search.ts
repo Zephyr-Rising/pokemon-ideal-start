@@ -6,7 +6,7 @@ import { abilityOf, engineKeeps } from './abilities'
 import {
   ACTIVE_TARGET,
   allInPlay,
-  energyType,
+  energyKind,
   signature,
   toBoardView,
   type InPlay,
@@ -34,11 +34,25 @@ export interface SearchResult {
   nodes: number
   /** False when the node budget stopped the search before it finished. */
   exhausted: boolean
+  /**
+   * With `keep` set: the best few distinct boards the turn could end on, best
+   * first, each with its own end-of-turn attachment made. For planning across
+   * turns, where this turn's best is not always the best start for the next.
+   */
+  alternatives: Alternative[]
+}
+
+export interface Alternative {
+  state: SimState
+  score: GoalScore
+  setup: number
 }
 
 export interface SearchOptions {
   /** Expansion budget. Reached only by unusually open hands. */
   maxNodes?: number
+  /** How many of the best end-of-turn boards to return as `alternatives`. */
+  keep?: number
 }
 
 /**
@@ -113,7 +127,7 @@ function closingAttachment(
   if (choices.length === 0) return null
   // A type the goal asks for, when it asks for one.
   const energy =
-    choices.find(({ card }) => ctx.energyTypes.has(energyType(card))) ?? choices[0]
+    choices.find(({ card }) => ctx.energyTypes.has(energyKind(card))) ?? choices[0]
 
   const worth = (slot: InPlay): number => {
     const key = slot.card.key
@@ -163,6 +177,15 @@ export function searchBestLine(
   options: SearchOptions = {},
 ): SearchResult {
   const maxNodes = options.maxNodes ?? DEFAULT_MAX_NODES
+  const keep = options.keep ?? 1
+  // The best few boards seen, best first; only kept when asked for.
+  const kept: Alternative[] = []
+  const remember = (candidate: Alternative) => {
+    if (kept.length === keep && !outranks(candidate, kept[kept.length - 1])) return
+    kept.push(candidate)
+    kept.sort((a, b) => (outranks(a, b) ? -1 : outranks(b, a) ? 1 : 0))
+    if (kept.length > keep) kept.pop()
+  }
   // The fewest plays each board has been reached in, so a shorter way to a
   // board already seen can still be followed.
   const seen = new Map<string, number>()
@@ -202,6 +225,7 @@ export function searchBestLine(
 
     const score = scoreBoard(goal, toBoardView(state), labelFor)
     const setup = ctx.multiTurn ? setupScore(state, ctx) : 0
+    if (keep > 1) remember({ state, score, setup })
     const tie = ties(score, best) && (!ctx.multiTurn || setup === bestSetup)
     if (
       better(score, best) ||
@@ -246,6 +270,11 @@ export function searchBestLine(
     }
   }
 
+  const alternatives = kept.map((alt) => {
+    const attached = closingAttachment(alt.state, ctx)
+    return attached ? { ...alt, state: attached.next, setup: setupScore(attached.next, ctx) } : alt
+  })
+
   const chain: Step[] = []
   for (let step: Step | null = bestNode; step; step = step.previous) chain.unshift(step)
   return {
@@ -256,5 +285,13 @@ export function searchBestLine(
     finalState: bestState,
     nodes,
     exhausted,
+    alternatives,
   }
+}
+
+/** Does `a` rank above `b` as a board to end the turn on? */
+export function outranks(a: Alternative, b: Alternative): boolean {
+  if (a.score.strict !== b.score.strict) return a.score.strict
+  if (a.score.closeness !== b.score.closeness) return a.score.closeness > b.score.closeness
+  return a.setup > b.setup
 }

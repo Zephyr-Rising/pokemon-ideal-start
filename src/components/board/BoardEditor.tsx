@@ -43,8 +43,10 @@ interface Props {
  * Luminous Energy is drawn for it, as the card that famously counts as every
  * type. It is not in the simulator's card pool, so its art is linked directly.
  */
+const ANY_ENERGY_KEY = 'any-energy'
+
 const ANY_ENERGY: DeckCard = {
-  key: 'any-energy',
+  key: ANY_ENERGY_KEY,
   label: 'Any Energy',
   resolvedName: null,
   count: 0,
@@ -77,7 +79,12 @@ const describeCard = (card: DeckCard): DroppedCard => ({
   isStadium: isStadiumCard(card),
   isEnergy: card.tags.includes('energy'),
   isTool: card.tags.includes('tool'),
-  energyType: card.card?.type || null,
+  // A Basic Energy asks for its type; a Special Energy for that very card.
+  energyType: card.tags.includes('basic-energy')
+    ? card.card?.type || null
+    : card.tags.includes('energy') && card.key !== ANY_ENERGY_KEY
+      ? card.key
+      : null,
 })
 
 export function BoardEditor({ cards, goal, onChange, horizon = 'turn1' }: Props) {
@@ -94,9 +101,13 @@ export function BoardEditor({ cards, goal, onChange, horizon = 'turn1' }: Props)
   const attachedTo = (slot: SlotGoal): AttachedCard[] => {
     const name = byKey.get(slot.cardKey)?.label ?? 'this Pokémon'
     const energy = slot.energy.map((type, index) => {
-      const deckEnergy = type
-        ? cards.find((card) => card.tags.includes('basic-energy') && card.card?.type === type)
-        : undefined
+      // A Special Energy is stored as its own card key.
+      const special = type ? byKey.get(type) : undefined
+      const deckEnergy =
+        special ??
+        (type
+          ? cards.find((card) => card.tags.includes('basic-energy') && card.card?.type === type)
+          : undefined)
       const record = type
         ? (deckEnergy?.card ?? findBasicEnergyByType(type))
         : ANY_ENERGY.card!

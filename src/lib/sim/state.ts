@@ -125,6 +125,15 @@ export const isTool = (card: DeckCard): boolean => card.tags.includes('tool')
 /** Energy type symbol a card provides, e.g. '{G}'. */
 export const energyType = (card: DeckCard): string => card.card?.type ?? ''
 
+/**
+ * What an Energy card counts as, for matching against a goal: a Basic Energy
+ * is its type (`{G}`), interchangeable with any other Grass; a Special Energy
+ * is that card itself, since the card data gives it no type and its effects
+ * are its own — Jet Energy is not "any" Energy, it is Jet Energy.
+ */
+export const energyKind = (card: DeckCard): string =>
+  card.tags.includes('basic-energy') ? energyType(card) : card.key
+
 const SKYLINER = norm('Latias ex')
 
 /**
@@ -151,13 +160,13 @@ export const toBoardView = (state: SimState): BoardView => ({
   active: state.active
     ? {
         cardKey: state.active.card.key,
-        energy: state.active.energy.map(energyType),
+        energy: state.active.energy.map(energyKind),
         tools: state.active.tools.map((tool) => tool.key),
       }
     : null,
   bench: state.bench.map((slot) => ({
     cardKey: slot.card.key,
-    energy: slot.energy.map(energyType),
+    energy: slot.energy.map(energyKind),
     tools: slot.tools.map((tool) => tool.key),
   })),
   stadiumKey: state.stadium?.key ?? null,
@@ -208,7 +217,7 @@ export function cloneState(state: SimState): SimState {
  */
 export function signature(state: SimState): string {
   const slot = (s: InPlay) =>
-    `${idOf(s.card)}+${s.energy.map(energyType).sort().join("")}+${sortedIds(s.tools)}${s.fresh ? '*' : ''}${s.usedAbility ? '!' : ''}`
+    `${idOf(s.card)}+${s.energy.map(energyKind).sort().join('')}+${sortedIds(s.tools)}${s.fresh ? '*' : ''}${s.usedAbility ? '!' : ''}`
   const flags =
     (state.usedEnergy ? 1 : 0) |
     (state.usedSupporter ? 2 : 0) |

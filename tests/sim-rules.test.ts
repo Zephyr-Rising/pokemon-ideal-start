@@ -5,6 +5,7 @@ import {
   BASE_BENCH,
   benchCap,
   cloneState,
+  energyKind,
   fairShuffle,
   inPlay,
   retreatCost,
@@ -439,5 +440,14 @@ describe('fair shuffles', () => {
     const first = keysOf(fairShuffle(state({}), pile, 7))
     const second = keysOf(fairShuffle(state({ shuffles: 1 }), pile, 7))
     expect(second).not.toEqual(first)
+  })
+})
+
+describe('energyKind', () => {
+  it('is the type for a Basic Energy and the card itself for a Special one', () => {
+    const grass = card('g', ['energy', 'basic-energy'], { type: '{G}' })
+    const mist = card('mist', ['energy', 'special-energy'], { type: '' })
+    expect(energyKind(grass)).toBe('{G}')
+    expect(energyKind(mist)).toBe('mist')
   })
 })
