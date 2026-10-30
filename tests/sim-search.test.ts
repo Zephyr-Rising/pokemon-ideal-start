@@ -331,3 +331,28 @@ describe('Telepathic Psychic Energy', () => {
     expect(result.score.strict).toBe(false)
   })
 })
+
+describe('cards in hand at the end of the turn', () => {
+  const grass = (key: string) => card(key, ['energy', 'basic-energy'], { type: '{G}', name: 'Grass Energy' })
+
+  it('keeps cards rather than spend them below the count', () => {
+    // Four in hand meets "at least 4"; the turn's Energy would drop it to 3.
+    const s = state({ active: inPlay(basic('dreepy')), hand: [grass('g'), basic('a'), basic('b'), basic('c')] })
+    const result = run(s, goal({ active: slot('a', 'dreepy'), handMin: 4 }))
+    expect(result.score.strict).toBe(true)
+    expect(result.finalState.hand).toHaveLength(4)
+  })
+
+  it('draws to reach it', () => {
+    const lillie = card('lillie', ['supporter'], { name: "Lillie's Determination" })
+    const s = state({
+      active: inPlay(basic('dreepy')),
+      hand: [lillie],
+      deck: Array.from({ length: 12 }, (_, i) => basic(`d${i}`)),
+      prizes: Array.from({ length: 6 }, (_, i) => basic(`p${i}`)),
+    })
+    const result = run(s, goal({ active: slot('a', 'dreepy'), handMin: 6 }))
+    expect(result.score.strict).toBe(true)
+    expect(result.finalState.hand.length).toBeGreaterThanOrEqual(6)
+  })
+})

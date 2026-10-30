@@ -82,6 +82,12 @@ export const attachTool = (goal: FieldGoal, id: string, toolKey: string) =>
 export const removeTool = (goal: FieldGoal, id: string, toolKey: string) =>
   mapSlot(goal, id, (slot) => ({ ...slot, tools: slot.tools.filter((t) => t !== toolKey) }))
 
+/** "At least this many cards in hand"; 0 turns it off. */
+export const setHandMin = (goal: FieldGoal, handMin: number): FieldGoal => ({
+  ...goal,
+  handMin: Math.max(0, Math.min(20, handMin)),
+})
+
 export const setBenchMin = (goal: FieldGoal, benchMin: number): FieldGoal => ({
   ...goal,
   // Eight is the most the game allows, with Area Zero Underdepths out.

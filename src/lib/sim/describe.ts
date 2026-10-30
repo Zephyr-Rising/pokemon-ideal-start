@@ -87,6 +87,23 @@ function evolutions(before: SimState, after: SimState): string[] {
   return out
 }
 
+/** "using Alakazam's Psychic Draw, drawing 3". */
+function onEvolveUse(pokemon: DeckCard, count: number): string {
+  return `using ${label(pokemon)}'s ${abilityOf(pokemon)?.ability ?? 'Ability'}, drawing ${count}`
+}
+
+/** The Pokémon a play evolved whose Ability draws as it evolves, if any. */
+function evolvedWithDraw(before: SimState, after: SimState): DeckCard | null {
+  const pairs = [
+    [before.active, after.active],
+    ...before.bench.map((slot, i) => [slot, after.bench[i]] as const),
+  ] as const
+  for (const [was, now] of pairs) {
+    if (was && now && was.card.key !== now.card.key && abilityOf(now.card)?.onEvolve) return now.card
+  }
+  return null
+}
+
 /** One step of the line, as the player would describe it. */
 export function describeStep(before: SimState, after: SimState, action: Action): string {
   const benched = gained(
@@ -134,7 +151,12 @@ export function describeStep(before: SimState, after: SimState, action: Action):
 
     case 'evolve': {
       const from = action.target === ACTIVE_TARGET ? before.active! : before.bench[action.target]
-      return `Evolve ${label(from.card)} into ${label(before.hand[action.handIndex])}`
+      const into = before.hand[action.handIndex]
+      const evolve = `Evolve ${label(from.card)} into ${label(into)}`
+      // Kadabra and Alakazam draw as they are played to evolve.
+      return drawn.length > 0
+        ? `${evolve} — ${onEvolveUse(into, drawn.length)}`
+        : evolve
     }
 
     case 'attachEnergy': {
@@ -162,17 +184,22 @@ export function describeStep(before: SimState, after: SimState, action: Action):
       const outcome: string[] = []
       if (benched.length > 0) outcome.push(`benching ${list(benched)}`)
 
+      // A Pokémon evolved by the card (Rare Candy) may draw as it goes on:
+      // Psychic Draw, not the card itself, is where those cards came from.
+      const drewOnEvolve = evolvedWithDraw(before, after)
+
       // A hand refresh replaces the hand wholesale; listing every card drawn
       // would be noise, so report the size instead.
       const refreshed = before.hand.length > 1 && drawn.length >= 4
-      if (refreshed) outcome.push(`drawing ${after.hand.length}`)
+      if (drewOnEvolve) outcome.push(`evolving ${list(evolutions(before, after))}`, onEvolveUse(drewOnEvolve, drawn.length))
+      else if (refreshed) outcome.push(`drawing ${after.hand.length}`)
       else if (drawn.length > 0) outcome.push(`taking ${list(drawn)}`)
 
       const energyTargets = energised(before, after)
       if (energyTargets.length > 0) outcome.push(`attaching to ${list(energyTargets)}`)
 
       const evolved = evolutions(before, after)
-      if (evolved.length > 0) outcome.push(`evolving ${list(evolved)}`)
+      if (evolved.length > 0 && !drewOnEvolve) outcome.push(`evolving ${list(evolved)}`)
 
       const discarded = after.discard.length - before.discard.length - 1
       if (discarded > 0) outcome.push(`discarding ${discarded}`)

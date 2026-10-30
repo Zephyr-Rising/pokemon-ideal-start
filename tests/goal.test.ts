@@ -314,3 +314,14 @@ describe('Special Energy', () => {
     expect(score.strict).toBe(true)
   })
 })
+
+describe('hand size', () => {
+  it('is a part of its own, met by any cards at all', () => {
+    const g = goal({ handMin: 3 })
+    const view = (hand: string[]): BoardView => ({ active: null, bench: [], stadiumKey: null, hand })
+    const score = (hand: string[]) => scoreBoard(g, view(hand), (k) => k)
+    expect(score(['a', 'b']).strict).toBe(false)
+    expect(score(['a', 'b', 'c']).strict).toBe(true)
+    expect(score([]).parts[0].label).toBe('3 or more cards in hand')
+  })
+})

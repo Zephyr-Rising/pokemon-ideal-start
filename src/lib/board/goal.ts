@@ -57,6 +57,11 @@ export interface FieldGoal {
   bench: SlotGoal[]
   /** "At least this many benched", whatever they are. 0 disables it. */
   benchMin: number
+  /**
+   * "At least this many cards in hand" at the end of the turn, whatever they
+   * are. 0 (or absent) disables it.
+   */
+  handMin?: number
   stadiumKey: string | null
   /** Other Stadiums that would do instead. */
   stadiumAlternatives?: string[]
@@ -120,6 +125,7 @@ export type PartKind =
   | 'benchEnergy'
   | 'benchTool'
   | 'benchMin'
+  | 'handMin'
   | 'stadium'
   | 'hand'
   | 'choice'
@@ -201,6 +207,7 @@ export const goalIsEmpty = (goal: FieldGoal): boolean =>
   goal.active === null &&
   goal.bench.length === 0 &&
   goal.benchMin === 0 &&
+  (goal.handMin ?? 0) === 0 &&
   goal.stadiumKey === null &&
   goal.inHand.length === 0
 
@@ -444,6 +451,16 @@ export function scoreBoard(
       kind: 'benchMin',
       label: `${goal.benchMin} or more benched`,
       met: board.bench.length >= goal.benchMin,
+      priority: 1,
+    })
+  }
+
+  if ((goal.handMin ?? 0) > 0) {
+    parts.push({
+      id: 'handMin',
+      kind: 'handMin',
+      label: `${goal.handMin} or more cards in hand`,
+      met: board.hand.length >= goal.handMin!,
       priority: 1,
     })
   }

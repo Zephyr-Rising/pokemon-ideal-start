@@ -366,3 +366,13 @@ test('builds an either/or across zones by tapping', async ({ page }) => {
   await expect(choices.getByText(label)).toBeVisible()
   await expect(page.getByTestId('board-parts').getByText(label).first()).toBeVisible({ timeout: 60_000 })
 })
+
+test('asks for a number of cards in hand', async ({ page }) => {
+  await openBoard(page)
+  await page.getByRole('button', { name: 'Pick Mega Kangaskhan ex' }).click()
+  await page.getByRole('button', { name: 'Place in Active spot' }).click()
+  await page.getByLabel('Minimum cards in hand').fill('5')
+  await expect(page.getByTestId('board-parts').getByText('5 or more cards in hand').first()).toBeVisible({
+    timeout: 60_000,
+  })
+})

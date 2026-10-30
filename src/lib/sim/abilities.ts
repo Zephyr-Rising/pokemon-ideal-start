@@ -179,14 +179,21 @@ export function useAbility(state: SimState, target: number, ctx: EffectContext):
 /**
  * Abilities that fire as a Pokémon is played from hand to evolve — Kadabra and
  * Alakazam's Psychic Draw. Rare Candy counts: it plays the Stage 2 from hand.
- * Optional, so the declined board comes back too.
+ *
+ * The card says "you may", but drawing never makes a board worse, so it is
+ * always used. Offering the declined board as well let the search pick it
+ * whenever the draws did not change this turn's score — which read, rightly,
+ * as Psychic Draw not triggering.
  */
 export function onEvolve(state: SimState, target: number, ctx: EffectContext): SimState[] {
   const slot = slotAt(state, target)
   const def = slot && abilityOf(slot.card)
   if (!slot || !def?.onEvolve || spent(state, slot)) return [state]
   if (def.usable && !def.usable(state, slot)) return [state]
-  return [...def.apply(spend(state, target), target, ctx), state]
+  // An empty deck has nothing to draw.
+  if (state.deck.length === 0) return [state]
+  const used = def.apply(spend(state, target), target, ctx)
+  return used.length > 0 ? used : [state]
 }
 
 /**

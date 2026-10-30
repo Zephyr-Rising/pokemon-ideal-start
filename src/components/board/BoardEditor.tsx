@@ -17,6 +17,7 @@ import {
   removeHand,
   removeTool,
   setBenchMin,
+  setHandMin,
   removeSlotEnergy,
   addChoice,
   removeChoice,
@@ -362,9 +363,24 @@ export function BoardEditor({ cards, goal, onChange, horizon = 'turn1' }: Props)
             </div>
 
             <div className="space-y-1">
-              <h3 className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
-                Still in hand
-              </h3>
+              <div className="flex items-baseline justify-between gap-2">
+                <h3 className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
+                  Still in hand
+                </h3>
+                <label className="flex items-center gap-1 text-xs text-slate-500">
+                  at least
+                  <input
+                    type="number"
+                    min={0}
+                    max={20}
+                    value={goal.handMin ?? 0}
+                    onChange={(e) => onChange(setHandMin(goal, Number(e.target.value) || 0))}
+                    aria-label="Minimum cards in hand"
+                    className="tnum w-14 rounded-md border border-slate-300 px-1.5 py-0.5 dark:border-slate-700 dark:bg-slate-950"
+                  />
+                  cards
+                </label>
+              </div>
               <Zone id="hand" picked={picked} onPick={place}>
                 <div className="flex flex-wrap gap-2">
                   {goal.inHand.map((want) => (
