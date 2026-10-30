@@ -19,6 +19,7 @@ import {
   setBenchMin,
   removeSlotEnergy,
   setPartPriority,
+  toggleAlternative,
   setStadium,
   type DropZone,
 } from '../../lib/board/edit'
@@ -119,7 +120,31 @@ export function BoardEditor({ cards, goal, onChange, horizon = 'turn1' }: Props)
     onToggle: picked === null ? () => setSelected(selected === id ? null : id) : undefined,
     onPriority: (partId: string, level: Priority) =>
       onChange(setPartPriority(goal, partId, level)),
+    either: eitherFor(id),
   })
+
+  /**
+   * The cards that could stand in for the one at `id`: other Pokémon for a
+   * Pokémon, other Stadiums for the Stadium, any other card for one kept in
+   * hand — and which of them already do.
+   */
+  const eitherFor = (id: string): EitherOr => {
+    const slot = [...(goal.active ? [goal.active] : []), ...goal.bench].find((s) => s.id === id)
+    const want = goal.inHand.find((w) => w.id === id)
+    const [own, chosen, fits]: [string | null, string[], (card: DeckCard) => boolean] = slot
+      ? [slot.cardKey, slot.alternatives ?? [], isPokemon]
+      : id === 'stadium'
+        ? [goal.stadiumKey, goal.stadiumAlternatives ?? [], isStadiumCard]
+        : want
+          ? [want.cardKey, want.alternatives ?? [], (card) => card.key !== ANY_ENERGY_KEY]
+          : [null, [], () => false]
+    return {
+      candidates: cards.filter((card) => card.key !== own && fits(card)),
+      chosen,
+      labelFor: (key) => byKey.get(key)?.label ?? key,
+      onToggle: (cardKey) => onChange(toggleAlternative(goal, id, cardKey)),
+    }
+  }
 
   /**
    * The Energy and Tools the goal asks for on one Pokémon, as cards to tuck
@@ -460,6 +485,7 @@ function SlotCard({
   open,
   onToggle,
   onPriority,
+  either,
 }: {
   slot?: SlotGoal
   card: DeckCard | undefined
@@ -474,6 +500,7 @@ function SlotCard({
   /** Tapping the card opens or closes them; absent while placing a card. */
   onToggle?: () => void
   onPriority: (partId: string, level: Priority) => void
+  either: EitherOr
 }) {
   const src = card ? cardImageUrl(card) : null
   const name = card?.label ?? 'Unknown'
@@ -547,8 +574,22 @@ function SlotCard({
         face
       )}
       {!slot && <figcaption className="truncate text-center text-[10px]">{name}</figcaption>}
+      {either.chosen.length > 0 && (
+        <p
+          className="truncate text-center text-[10px] text-sky-700 dark:text-sky-400"
+          title={`or ${either.chosen.map(either.labelFor).join(' or ')}`}
+        >
+          or {either.chosen.map(either.labelFor).join(' or ')}
+        </p>
+      )}
       {open && parts.length > 0 && (
-        <PriorityPopover name={name} parts={parts} onPriority={onPriority} onClose={onToggle} />
+        <PriorityPopover
+          name={name}
+          parts={parts}
+          onPriority={onPriority}
+          onClose={onToggle}
+          either={either}
+        />
       )}
     </figure>
   )
@@ -659,11 +700,13 @@ function PriorityPopover({
   parts,
   onPriority,
   onClose,
+  either,
 }: {
   name: string
   parts: GoalPart[]
   onPriority: (partId: string, level: Priority) => void
   onClose?: () => void
+  either: EitherOr
 }) {
   return (
     <div
@@ -716,6 +759,41 @@ function PriorityPopover({
         A game that has every part at a level, and every more important one, counts as a partial
         success at that level.
       </p>
+      {either.candidates.length > 0 && (
+        <div className="space-y-1 border-t border-slate-100 pt-2 dark:border-slate-800">
+          <div className="font-semibold">Either/or</div>
+          <p className="text-slate-500">Also a success with any of these instead of {name}:</p>
+          <div className="flex max-h-32 flex-wrap gap-1 overflow-y-auto" role="group" aria-label={`Either/or for ${name}`}>
+            {either.candidates.map((card) => {
+              const on = either.chosen.includes(card.key)
+              return (
+                <button
+                  key={card.key}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => either.onToggle(card.key)}
+                  className={[
+                    'rounded-md border px-1.5 py-0.5',
+                    on
+                      ? 'border-sky-500 bg-sky-50 font-medium text-sky-800 dark:bg-sky-950/40 dark:text-sky-200'
+                      : 'border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800',
+                  ].join(' ')}
+                >
+                  {card.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
+}
+
+/** The cards that could stand in for one on the board, and which already do. */
+interface EitherOr {
+  candidates: DeckCard[]
+  chosen: string[]
+  labelFor: (cardKey: string) => string
+  onToggle: (cardKey: string) => void
 }

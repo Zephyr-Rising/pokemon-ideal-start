@@ -1,4 +1,4 @@
-import type { FieldGoal } from '../board/goal'
+import { acceptedKeys, type FieldGoal } from '../board/goal'
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
 import { abilityOf } from './abilities'
@@ -26,15 +26,22 @@ export function buildContext(
   cards: DeckCard[] = [],
 ): ActionContext {
   const relevant = new Set<string>()
-  if (goal.active) relevant.add(goal.active.cardKey)
-  for (const slot of goal.bench) relevant.add(slot.cardKey)
+  const slots = [...(goal.active ? [goal.active] : []), ...goal.bench]
+  // Each Pokémon the goal places, and any it would take instead.
+  for (const slot of slots) {
+    for (const key of acceptedKeys(slot.cardKey, slot.alternatives)) relevant.add(key)
+  }
   // The Tools the goal puts on its Pokémon: without these a Tool could never
   // be attached or fetched, and any board with one could never be built.
   for (const slot of [...(goal.active ? [goal.active] : []), ...goal.bench]) {
     for (const toolKey of slot.tools) relevant.add(toolKey)
   }
-  if (goal.stadiumKey) relevant.add(goal.stadiumKey)
-  for (const want of goal.inHand) relevant.add(want.cardKey)
+  if (goal.stadiumKey) {
+    for (const key of acceptedKeys(goal.stadiumKey, goal.stadiumAlternatives)) relevant.add(key)
+  }
+  for (const want of goal.inHand) {
+    for (const key of acceptedKeys(want.cardKey, want.alternatives)) relevant.add(key)
+  }
 
   // A goal Pokémon that evolves is reached through its earlier stages, so they
   // matter too: Dragapult ex on the board makes Dreepy and Drakloak worth
@@ -66,12 +73,15 @@ export function buildContext(
   // The goal's Active and its earlier stages, by how many evolutions short of
   // it each is: 0 for the card itself. Retreating only ever moves along this.
   const activeLineage = new Map<string, number>()
-  if (goal.active) {
-    activeLineage.set(goal.active.cardKey, 0)
-    const top = cards.find((c) => c.key === goal.active!.cardKey)
+  // Every Pokémon the Active slot would take, each with its own line.
+  for (const key of goal.active ? acceptedKeys(goal.active.cardKey, goal.active.alternatives) : []) {
+    activeLineage.set(key, 0)
+    const top = cards.find((c) => c.key === key)
     let prev = top?.card?.prev ? norm(top.card.prev) : null
     for (let steps = 1; prev && steps <= 2; steps++) {
-      for (const earlier of byName.get(prev) ?? []) activeLineage.set(earlier.key, steps)
+      for (const earlier of byName.get(prev) ?? []) {
+        if (!activeLineage.has(earlier.key)) activeLineage.set(earlier.key, steps)
+      }
       prev = prevOf.get(prev) ?? null
     }
   }
@@ -90,10 +100,14 @@ export function buildContext(
     return line
   }
   const goalLines = new Map<string, { keys: Set<string>; needed: number }>()
-  for (const slot of [...(goal.active ? [goal.active] : []), ...goal.bench]) {
-    const entry = goalLines.get(slot.cardKey) ?? { keys: lineOfKey(slot.cardKey), needed: 0 }
+  for (const slot of slots) {
+    // A slot with alternatives is one line made of all of theirs.
+    const accepted = acceptedKeys(slot.cardKey, slot.alternatives)
+    const id = [...accepted].sort().join('|')
+    const keys = new Set(accepted.flatMap((key) => [...lineOfKey(key)]))
+    const entry = goalLines.get(id) ?? { keys, needed: 0 }
     entry.needed++
-    goalLines.set(slot.cardKey, entry)
+    goalLines.set(id, entry)
   }
 
   let wantsGrassEvolution = false
@@ -121,7 +135,9 @@ export function buildContext(
 
   // Which Pokémon the goal wants Energy on. Attaching anywhere else cannot
   // bring the board closer this turn, so those plays are never generated.
-  const energyTargets = new Set(energySlots.map((slot) => slot.cardKey))
+  const energyTargets = new Set(
+    energySlots.flatMap((slot) => acceptedKeys(slot.cardKey, slot.alternatives)),
+  )
   // ...and their earlier stages, since Energy stays attached through
   // evolution: Psychic for a Dragapult ex belongs on the Dreepy that becomes
   // it. Kept apart from the search's targets on purpose — within a turn,

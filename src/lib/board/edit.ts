@@ -167,3 +167,25 @@ export function setPartPriority(goal: FieldGoal, partId: string, priority: Prior
   else priorities[partId] = priority
   return { ...goal, priorities }
 }
+
+/**
+ * Add or remove a card that would do instead of the one on the board, for a
+ * Pokémon slot (by its id), the Stadium (`'stadium'`) or a card kept in hand
+ * (by its id).
+ */
+export function toggleAlternative(goal: FieldGoal, id: string, cardKey: string): FieldGoal {
+  const toggle = (list: string[] | undefined) => {
+    const current = list ?? []
+    return current.includes(cardKey) ? current.filter((key) => key !== cardKey) : [...current, cardKey]
+  }
+  if (id === 'stadium') return { ...goal, stadiumAlternatives: toggle(goal.stadiumAlternatives) }
+  if (goal.inHand.some((want) => want.id === id)) {
+    return {
+      ...goal,
+      inHand: goal.inHand.map((want) =>
+        want.id === id ? { ...want, alternatives: toggle(want.alternatives) } : want,
+      ),
+    }
+  }
+  return mapSlot(goal, id, (slot) => ({ ...slot, alternatives: toggle(slot.alternatives) }))
+}

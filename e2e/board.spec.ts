@@ -324,3 +324,20 @@ test('places an evolved Pokémon in the Active Spot without errors', async ({ pa
   }
   expect(errors).toEqual([])
 })
+
+test('marks an either/or alternative from the card popover', async ({ page }) => {
+  await openBoard(page)
+  await page.getByRole('button', { name: 'Pick Fezandipiti ex' }).click()
+  await page.getByRole('button', { name: 'Place in Bench' }).click()
+  await page.getByRole('button', { name: 'Set priority for Fezandipiti ex' }).click()
+  await page
+    .getByRole('group', { name: 'Either/or for Fezandipiti ex' })
+    .getByRole('button', { name: 'Latias ex' })
+    .click()
+  await page.getByTestId('priority-popover').getByRole('button', { name: 'Done' }).click()
+  // The card says so, and the board part reads as either/or.
+  await expect(page.getByText('or Latias ex')).toBeVisible()
+  await expect(
+    page.getByTestId('board-parts').getByText('Fezandipiti ex or Latias ex benched'),
+  ).toBeVisible({ timeout: 60_000 })
+})

@@ -37,12 +37,19 @@ export interface SlotGoal {
   energy: (string | null)[]
   /** Tools that must be attached to this Pokémon. */
   tools: string[]
+  /**
+   * Other Pokémon that would do instead: the slot is met by `cardKey` or any of
+   * these. Its Energy and Tools go on whichever one fills it.
+   */
+  alternatives?: string[]
 }
 
 export interface HandGoal {
   id: string
   cardKey: string
   count: number
+  /** Other cards that would do instead; any mix of them counts. */
+  alternatives?: string[]
 }
 
 export interface FieldGoal {
@@ -51,6 +58,8 @@ export interface FieldGoal {
   /** "At least this many benched", whatever they are. 0 disables it. */
   benchMin: number
   stadiumKey: string | null
+  /** Other Stadiums that would do instead. */
+  stadiumAlternatives?: string[]
   inHand: HandGoal[]
   /**
    * How much each part of the board matters, by part id: 1 is essential, 3 is
@@ -61,6 +70,16 @@ export interface FieldGoal {
 }
 
 export type Priority = 1 | 2 | 3
+
+/** Every card that fills a place on the board: the card itself, then any alternatives. */
+export const acceptedKeys = (cardKey: string, alternatives?: string[]): string[] => [
+  cardKey,
+  ...(alternatives ?? []),
+]
+
+/** "Munkidori or Fezandipiti ex". */
+const eitherOr = (keys: string[], labelFor: (cardKey: string) => string): string =>
+  keys.map(labelFor).join(' or ')
 
 export const PRIORITY_LEVELS: { level: Priority; label: string }[] = [
   { level: 1, label: 'Essential' },
@@ -189,24 +208,24 @@ function energyMet(pokemon: BoardPokemon | undefined, slot: SlotGoal): boolean {
  * satisfies the greatest number of Energy parts.
  */
 function pairBench(goals: SlotGoal[], bench: BoardPokemon[]): Map<string, BoardPokemon | undefined> {
-  const available = new Map<string, BoardPokemon[]>()
-  for (const pokemon of bench) {
-    const list = available.get(pokemon.cardKey)
-    if (list) list.push(pokemon)
-    else available.set(pokemon.cardKey, [pokemon])
-  }
   // Best-equipped first, so the fussiest slot gets the Pokémon most likely to
   // satisfy it.
-  for (const list of available.values()) {
-    list.sort((a, b) => b.energy.length + b.tools.length - (a.energy.length + a.tools.length))
-  }
-
-  const paired = new Map<string, BoardPokemon | undefined>()
-  const byDemand = [...goals].sort(
+  const available = [...bench].sort(
     (a, b) => b.energy.length + b.tools.length - (a.energy.length + a.tools.length),
   )
-  for (const goal of byDemand) {
-    paired.set(goal.id, available.get(goal.cardKey)?.shift())
+  const paired = new Map<string, BoardPokemon | undefined>()
+  // Slots with fewer alternatives choose first, so a slot that would take
+  // either of two Pokémon does not use up the only one a stricter slot can;
+  // then the most demanding.
+  const order = [...goals].sort(
+    (a, b) =>
+      (a.alternatives?.length ?? 0) - (b.alternatives?.length ?? 0) ||
+      b.energy.length + b.tools.length - (a.energy.length + a.tools.length),
+  )
+  for (const goal of order) {
+    const accepted = acceptedKeys(goal.cardKey, goal.alternatives)
+    const at = available.findIndex((pokemon) => accepted.includes(pokemon.cardKey))
+    paired.set(goal.id, at < 0 ? undefined : available.splice(at, 1)[0])
   }
   return paired
 }
@@ -277,15 +296,16 @@ function benchNames(
   bench: SlotGoal[],
   labelFor: (cardKey: string) => string,
 ): Map<string, string> {
+  const labelOf = (slot: SlotGoal) => eitherOr(acceptedKeys(slot.cardKey, slot.alternatives), labelFor)
   const total = new Map<string, number>()
-  for (const slot of bench) total.set(slot.cardKey, (total.get(slot.cardKey) ?? 0) + 1)
+  for (const slot of bench) total.set(labelOf(slot), (total.get(labelOf(slot)) ?? 0) + 1)
   const seen = new Map<string, number>()
   const names = new Map<string, string>()
   for (const slot of bench) {
-    const nth = (seen.get(slot.cardKey) ?? 0) + 1
-    seen.set(slot.cardKey, nth)
-    const label = labelFor(slot.cardKey)
-    names.set(slot.id, total.get(slot.cardKey)! > 1 ? `${label} #${nth}` : label)
+    const label = labelOf(slot)
+    const nth = (seen.get(label) ?? 0) + 1
+    seen.set(label, nth)
+    names.set(slot.id, total.get(label)! > 1 ? `${label} #${nth}` : label)
   }
   return names
 }
@@ -298,11 +318,12 @@ export function scoreBoard(
   const parts: GoalPart[] = []
 
   if (goal.active) {
-    const matches = board.active?.cardKey === goal.active.cardKey
+    const accepted = acceptedKeys(goal.active.cardKey, goal.active.alternatives)
+    const matches = board.active !== null && accepted.includes(board.active.cardKey)
     parts.push({
       id: `${goal.active.id}:card`,
       kind: 'active',
-      label: `${labelFor(goal.active.cardKey)} Active`,
+      label: `${eitherOr(accepted, labelFor)} Active`,
       met: matches,
       priority: 1,
     })
@@ -374,21 +395,24 @@ export function scoreBoard(
     parts.push({
       id: 'stadium',
       kind: 'stadium',
-      label: `${labelFor(goal.stadiumKey)} in play`,
-      met: board.stadiumKey === goal.stadiumKey,
+      label: `${eitherOr(acceptedKeys(goal.stadiumKey, goal.stadiumAlternatives), labelFor)} in play`,
+      met:
+        board.stadiumKey !== null &&
+        acceptedKeys(goal.stadiumKey, goal.stadiumAlternatives).includes(board.stadiumKey),
       priority: 1,
     })
   }
 
   for (const want of goal.inHand) {
-    const held = board.hand.filter((key) => key === want.cardKey).length
+    const accepted = acceptedKeys(want.cardKey, want.alternatives)
+    const held = board.hand.filter((key) => accepted.includes(key)).length
     parts.push({
       id: `${want.id}:hand`,
       kind: 'hand',
       label:
         want.count === 1
-          ? `${labelFor(want.cardKey)} still in hand`
-          : `${want.count}× ${labelFor(want.cardKey)} still in hand`,
+          ? `${eitherOr(accepted, labelFor)} still in hand`
+          : `${want.count}× ${eitherOr(accepted, labelFor)} still in hand`,
       met: held >= want.count,
       priority: 1,
     })

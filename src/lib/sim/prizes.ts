@@ -1,4 +1,4 @@
-import type { FieldGoal, Priority } from '../board/goal'
+import { acceptedKeys, type FieldGoal, type Priority } from '../board/goal'
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
 import { energyFits, nameOf } from './state'
@@ -61,6 +61,17 @@ export function boardRequirements(
   const slots = [...(goal.active ? [goal.active] : []), ...goal.bench]
   for (const slot of slots) {
     if (!counts(`${slot.id}:card`)) continue
+    // With alternatives, any of them will do. Only the cards themselves are
+    // checked, not each one's earlier stages: that can miss an impossible
+    // game, but never calls a possible one impossible.
+    if (slot.alternatives?.length) {
+      const accepted = acceptedKeys(slot.cardKey, slot.alternatives)
+      need(`either:${[...accepted].sort().join('|')}`, () => ({
+        label: accepted.map(labelFor).join(' or '),
+        matches: (card) => accepted.includes(card.key),
+      }))
+      continue
+    }
     // The goal card itself, by its exact printing — that is what is scored.
     need(`card:${slot.cardKey}`, () => ({
       label: labelFor(slot.cardKey),
@@ -113,14 +124,21 @@ export function boardRequirements(
     need('energy:total', () => ({ label: 'Energy', matches: (card) => card.tags.includes('energy') }), totalEnergy)
   }
   if (goal.stadiumKey && counts('stadium')) {
-    const key = goal.stadiumKey
-    need(`card:${key}`, () => ({ label: labelFor(key), matches: (card) => card.key === key }))
+    const accepted = acceptedKeys(goal.stadiumKey, goal.stadiumAlternatives)
+    need(`either:${[...accepted].sort().join('|')}`, () => ({
+      label: accepted.map(labelFor).join(' or '),
+      matches: (card) => accepted.includes(card.key),
+    }))
   }
   for (const want of goal.inHand) {
     if (!counts(`${want.id}:hand`)) continue
+    const accepted = acceptedKeys(want.cardKey, want.alternatives)
     need(
-      `card:${want.cardKey}`,
-      () => ({ label: labelFor(want.cardKey), matches: (card) => card.key === want.cardKey }),
+      `either:${[...accepted].sort().join('|')}`,
+      () => ({
+        label: accepted.map(labelFor).join(' or '),
+        matches: (card) => accepted.includes(card.key),
+      }),
       want.count,
     )
   }
