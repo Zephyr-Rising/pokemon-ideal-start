@@ -336,6 +336,7 @@ export function playtest(
     // Close to done, the full result is shown and updated as games finish.
     if (
       options.onPartial &&
+      !options.onlyTrials &&
       (options.partialAt
         ? options.partialAt(trial + 1, trials)
         : trial + 1 < trials &&
@@ -352,7 +353,8 @@ export function playtest(
     if (asSecond.score.strict) addRoute(secondRoutes, toExample(asSecond, false, trial))
   }
 
-  return summarize(trials)
+  // A replay of chosen deals counts only those it played.
+  return summarize(options.onlyTrials ? Math.max(1, options.onlyTrials.size) : trials)
 }
 
 function addRoute(routes: Map<string, PlaytestExample>, example: PlaytestExample): void {

@@ -5,6 +5,7 @@ import { PlaytestResults } from './components/board/PlaytestResults'
 import { TurnsResults } from './components/board/TurnsResults'
 import { ConditionBuilder } from './components/ConditionBuilder'
 import { DeckImport } from './components/DeckImport'
+import { CopyCode, ImportCode } from './components/ShareCode'
 import { PrizeRisk } from './components/PrizeRisk'
 import { ResultsPanel } from './components/ResultsPanel'
 import { SampleHand } from './components/SampleHand'
@@ -23,6 +24,7 @@ import { prizeRiskRows } from './lib/prob/prizes'
 import { sensitivity } from './lib/prob/sensitivity'
 import { resolveDeck } from './lib/resolve-cards'
 import { sampleHand, type SampleMode } from './lib/sample-hand'
+import { cardDataVersion, encodeShare, type SharePayload } from './lib/share'
 import { seedCondition } from './lib/seed-condition'
 import { usePlaytest, useTurns } from './lib/use-playtest'
 
@@ -48,6 +50,13 @@ export default function App() {
   useEffect(() => applyDesign(design), [design])
   const [trials, setTrials] = useState<number>(1500)
   const [turnTrials, setTurnTrials] = useState<number>(200)
+  // Every game is seeded from this, its deal number and its turn order.
+  const [seed, setSeed] = useState(1)
+  // An imported code: applied once its deck has loaded, then searched.
+  const [pending, setPending] = useState<SharePayload | null>(null)
+  const [autoRun, setAutoRun] = useState<SharePayload | null>(null)
+  // The imported game to open the examples on.
+  const [focus, setFocus] = useState<SharePayload['game'] | null>(null)
 
   const deck = useMemo(() => resolveDeck(text), [text])
 
@@ -64,6 +73,18 @@ export default function App() {
     setCondition(seedCondition(deck.cards))
     setGoal(emptyGoal())
     setEdited(false)
+  }
+  // An imported code's board, once its deck is the one loaded (the deck
+  // change above would otherwise clear it).
+  if (pending && pending.deck === text && lastSignature === signature) {
+    setPending(null)
+    setGoal(pending.goal)
+    setTab(pending.tab)
+    if (pending.tab === 'turns') setTurnTrials(pending.games)
+    else setTrials(pending.games)
+    setSeed(pending.seed)
+    setFocus(pending.game ?? null)
+    setAutoRun(pending)
   }
 
   const editCondition = (next: Condition) => {
@@ -113,8 +134,36 @@ export default function App() {
 
   // The simulations are far too slow for the main thread, so each runs in a
   // worker and streams progress — when its Search button is pressed.
-  const playtest = usePlaytest(deck.cards, goal, trials, 1)
-  const turns = useTurns(deck.cards, goal, turnTrials, 1)
+  const playtest = usePlaytest(deck.cards, goal, trials, seed)
+  const turns = useTurns(deck.cards, goal, turnTrials, seed)
+
+  // An imported code runs as soon as its board is in place: the whole setup,
+  // or just its one game.
+  const autoSearch = autoRun && autoRun.goal === goal ? autoRun : null
+  useEffect(() => {
+    if (!autoSearch) return
+    const sim = autoSearch.tab === 'turns' ? turns : playtest
+    sim.search(autoSearch.game ? { onlyTrials: [autoSearch.game.trial] } : undefined)
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot: the import has run
+    setAutoRun(null)
+  }, [autoSearch, turns, playtest])
+
+  const importCode = (payload: SharePayload) => {
+    setText(payload.deck)
+    setPending(payload)
+  }
+  /** A code for the board as it is, or for one game of its run. */
+  const shareCode = (shareTab: 'turns' | 'board', game?: SharePayload['game']) =>
+    encodeShare({
+      v: 1,
+      db: cardDataVersion(),
+      deck: text,
+      goal,
+      tab: shareTab,
+      games: shareTab === 'turns' ? turnTrials : trials,
+      seed,
+      ...(game ? { game } : {}),
+    })
 
   const hasDeck = deck.cards.length > 0
 
@@ -137,7 +186,10 @@ export default function App() {
 
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
       <main className="app-main space-y-10">
-        <DeckImport text={text} deck={deck} onChange={setText} onAdjust={adjust} />
+        <div className="space-y-2">
+          <DeckImport text={text} deck={deck} onChange={setText} onAdjust={adjust} />
+          <ImportCode onImport={importCode} />
+        </div>
 
         {hasDeck && (
           <>
@@ -186,11 +238,14 @@ export default function App() {
                   trials={turnTrials}
                   choices={TURN_TRIAL_CHOICES}
                   onTrials={setTurnTrials}
+                  onCopySetup={() => shareCode('turns')}
                 />
                 <TurnsResults
                   goal={goal}
                   state={turns}
                   cards={deck.cards}
+                  onCopyGame={(game) => shareCode('turns', game)}
+                  focus={focus}
                   onFewer={
                     turnTrials > TURN_TRIAL_CHOICES[0]
                       ? () => {
@@ -210,11 +265,14 @@ export default function App() {
                   trials={trials}
                   choices={TRIAL_CHOICES}
                   onTrials={setTrials}
+                  onCopySetup={() => shareCode('board')}
                 />
                 <PlaytestResults
                   goal={goal}
                   state={playtest}
                   cards={deck.cards}
+                  onCopyGame={(game) => shareCode('board', game)}
+                  focus={focus}
                   onFewer={
                     trials > TRIAL_CHOICES[0]
                       ? () => {
@@ -288,14 +346,23 @@ function SearchBar({
   trials,
   choices,
   onTrials,
+  onCopySetup,
 }: {
-  state: { running: boolean; result: unknown; stale: boolean; search: () => void }
+  state: {
+    running: boolean
+    result: unknown
+    stale: boolean
+    search: () => void
+    only: number[] | null
+  }
   empty: boolean
   trials: number
   choices: readonly number[]
   onTrials: (trials: number) => void
+  /** A code for this setup, to share or reload. */
+  onCopySetup: () => Promise<string>
 }) {
-  const { running, result, stale, search } = state
+  const { running, result, stale, search, only } = state
   const label = running ? 'Restart search' : result ? 'Search again' : 'Search'
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -322,6 +389,13 @@ function SearchBar({
         </select>
         more games narrows the margin of error
       </label>
+      {!empty && <CopyCode label="Copy setup code" make={onCopySetup} />}
+      {only && result !== null && (
+        <p data-testid="shared-game" className="w-full rounded-md bg-sky-50 px-3 py-2 text-xs text-sky-900 dark:bg-sky-950/40 dark:text-sky-200">
+          Showing one shared game: deal {only[0] + 1} of this setup, replayed exactly. Search again to
+          play all {trials.toLocaleString()} games.
+        </p>
+      )}
       {empty ? (
         <p className="w-full text-xs text-slate-500">Put something on the board to search it.</p>
       ) : stale && !running ? (

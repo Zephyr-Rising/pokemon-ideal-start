@@ -9,6 +9,7 @@ import { Combinations } from './Combinations'
 import { PartialSuccessRates } from './PartialSuccess'
 import { PrizeNote } from './PrizeNote'
 import { ReplayPlayer } from './ReplayPlayer'
+import { CopyCode } from '../ShareCode'
 import { SimulationProgress } from './SimulationProgress'
 
 interface Props {
@@ -18,9 +19,13 @@ interface Props {
   cards: DeckCard[]
   /** Switch to the smallest game count, offered when a run is slow. */
   onFewer?: () => void
+  /** A code for one example game, to share or replay. */
+  onCopyGame?: (game: { trial: number; goingFirst: boolean }) => Promise<string>
+  /** The shared game to show first, when one was imported. */
+  focus?: { trial: number; goingFirst: boolean } | null
 }
 
-export function PlaytestResults({ goal, state, cards, onFewer }: Props) {
+export function PlaytestResults({ goal, state, cards, onFewer, onCopyGame, focus }: Props) {
   if (goalIsEmpty(goal)) {
     return (
       <section className="space-y-3">
@@ -169,6 +174,8 @@ export function PlaytestResults({ goal, state, cards, onFewer }: Props) {
               key={state.runId}
               examples={result.examples}
               cards={cards}
+              onCopyGame={onCopyGame}
+              focus={focus}
             />
           )}
 
@@ -215,8 +222,24 @@ const rateIn = (parts: PartStat[], id: string): number =>
  * plays in a different order count as one — so stepping through them shows
  * genuinely different ways there rather than the same way reshuffled.
  */
-function Routes({ examples, cards }: { examples: PlaytestExample[]; cards: DeckCard[] }) {
-  const [index, setIndex] = useState(0)
+function Routes({
+  examples,
+  cards,
+  onCopyGame,
+  focus,
+}: {
+  examples: PlaytestExample[]
+  cards: DeckCard[]
+  onCopyGame?: (game: { trial: number; goingFirst: boolean }) => Promise<string>
+  focus?: { trial: number; goingFirst: boolean } | null
+}) {
+  // A shared game opens on itself; otherwise the first route.
+  const [index, setIndex] = useState(() =>
+    Math.max(
+      0,
+      examples.findIndex((e) => focus && e.trial === focus.trial && e.goingFirst === focus.goingFirst),
+    ),
+  )
   const example = examples[Math.min(index, examples.length - 1)]
   const more = examples.length > 1
 
@@ -232,6 +255,12 @@ function Routes({ examples, cards }: { examples: PlaytestExample[]; cards: DeckC
             {example.goingFirst ? 'going first' : 'going second'}
           </span>
         </h3>
+        {onCopyGame && (
+          <CopyCode
+            label="Copy this game's code"
+            make={() => onCopyGame({ trial: example.trial, goingFirst: example.goingFirst })}
+          />
+        )}
         {more && (
           <div className="flex items-center gap-2">
             <span className="tnum text-xs text-slate-500">

@@ -14,6 +14,7 @@ import type { DeckCard } from '../../lib/types'
 import type { TurnsState } from '../../lib/use-playtest'
 import { PartialSuccessTurns } from './PartialSuccess'
 import { PrizeNote } from './PrizeNote'
+import { CopyCode } from '../ShareCode'
 import { ReplayPlayer } from './ReplayPlayer'
 import { SimulationProgress } from './SimulationProgress'
 
@@ -24,6 +25,10 @@ interface Props {
   cards: DeckCard[]
   /** Switch to the smallest game count, offered when a run is slow. */
   onFewer?: () => void
+  /** A code for one example game, to share or replay. */
+  onCopyGame?: (game: { trial: number; goingFirst: boolean }) => Promise<string>
+  /** The shared game to show first, when one was imported. */
+  focus?: { trial: number; goingFirst: boolean } | null
 }
 
 /** "Turn 3", or a plain statement when fewer than half the games get there. */
@@ -33,7 +38,7 @@ const medianText = (order: TurnsOrderResult): string =>
 const meanText = (order: TurnsOrderResult): string =>
   order.mean === null ? '—' : order.mean.toFixed(1)
 
-export function TurnsResults({ goal, state, cards, onFewer }: Props) {
+export function TurnsResults({ goal, state, cards, onFewer, onCopyGame, focus }: Props) {
   if (goalIsEmpty(goal)) {
     return (
       <section className="space-y-3">
@@ -174,6 +179,8 @@ export function TurnsResults({ goal, state, cards, onFewer }: Props) {
               key={state.runId}
               examples={result.examples}
               cards={cards}
+              onCopyGame={onCopyGame}
+              focus={focus}
             />
           )}
 
@@ -482,8 +489,24 @@ function PartTurns({ result }: { result: TurnsResult }) {
  * any game built the board on, so the slow routes can be seen as well as the
  * quick ones.
  */
-function TurnExamples({ examples, cards }: { examples: TurnsExample[]; cards: DeckCard[] }) {
-  const [index, setIndex] = useState(0)
+function TurnExamples({
+  examples,
+  cards,
+  onCopyGame,
+  focus,
+}: {
+  examples: TurnsExample[]
+  cards: DeckCard[]
+  onCopyGame?: (game: { trial: number; goingFirst: boolean }) => Promise<string>
+  focus?: { trial: number; goingFirst: boolean } | null
+}) {
+  // A shared game opens on itself; otherwise the fastest.
+  const [index, setIndex] = useState(() =>
+    Math.max(
+      0,
+      examples.findIndex((e) => focus && e.trial === focus.trial && e.goingFirst === focus.goingFirst),
+    ),
+  )
   const example = examples[Math.min(index, examples.length - 1)]
 
   return (
@@ -491,7 +514,15 @@ function TurnExamples({ examples, cards }: { examples: TurnsExample[]; cards: De
       data-testid="turns-examples"
       className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"
     >
-      <h3 className="text-sm font-semibold">How games get there</h3>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold">How games get there</h3>
+        {onCopyGame && (
+          <CopyCode
+            label="Copy this game's code"
+            make={() => onCopyGame({ trial: example.trial, goingFirst: example.goingFirst })}
+          />
+        )}
+      </div>
       <p className="mt-0.5 mb-3 text-xs text-slate-500">
         Real games from this run, fastest first: one for every turn a game built the board on, from
         each turn order, and one that never got there, to show what held it back.

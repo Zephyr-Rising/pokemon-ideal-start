@@ -697,10 +697,11 @@ export function turnsTest(
       })
     }
     // Close to done, the full result is shown and updated game by game.
-    if (options.onPartial && (options.partialAt ?? lateGames)(trial + 1, trials)) {
+    if (options.onPartial && !options.onlyTrials && (options.partialAt ?? lateGames)(trial + 1, trials)) {
       options.onPartial(summarize(trial + 1))
     }
   }
 
-  return summarize(trials)
+  // A replay of chosen deals counts only those it played.
+  return summarize(options.onlyTrials ? Math.max(1, options.onlyTrials.size) : trials)
 }

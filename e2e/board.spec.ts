@@ -517,3 +517,32 @@ test('asks for the Supporter to be still free, alone or in an either/or', async 
     page.getByTestId('board-parts').getByText('Supporter still free, or 6 or more cards in hand').first(),
   ).toBeVisible({ timeout: 60_000 })
 })
+
+test('shares one game as a code, and replays it from the code', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await stubCardArt(page)
+  await page.goto('./')
+  await page.getByRole('button', { name: 'Load example' }).click()
+  await page.getByRole('button', { name: 'Pick Raging Bolt ex' }).click()
+  await page.getByRole('button', { name: 'Place in Active spot' }).click()
+  await search(page)
+  await expect(page.getByTestId('simulation-progress')).toHaveCount(0, { timeout: 90_000 })
+
+  const examples = page.getByTestId('turns-examples')
+  // Each step's text, without its number.
+  const stepsOf = (scope: typeof examples) => scope.locator('ol li > span:last-child').allInnerTexts()
+  const steps = await stepsOf(examples)
+  await examples.getByRole('button', { name: "Copy this game's code" }).click()
+  await expect(examples.getByRole('button', { name: 'Copied' })).toBeVisible()
+  const code = await page.evaluate(() => navigator.clipboard.readText())
+  expect(code).toMatch(/^IS1-/)
+
+  // A fresh page, the code pasted in: the same game comes back.
+  await page.goto('./')
+  await page.getByText('Have a shared code?').click()
+  await page.getByLabel('Shared code').fill(code)
+  await page.getByRole('button', { name: 'Load', exact: true }).click()
+  await expect(page.getByTestId('shared-game')).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByRole('button', { name: 'Remove Raging Bolt ex' })).toBeVisible()
+  await expect.poll(() => stepsOf(page.getByTestId('turns-examples'))).toEqual(steps)
+})
