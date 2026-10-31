@@ -14,6 +14,11 @@ import {
 import { mulberry32, shuffled } from './rng'
 import { luckCounters, summariseLuck, type LuckRecord, type LuckStat } from './luck'
 import { boardRequirements, PrizeLockTally, prizeLocks, type PrizeLockStat } from './prizes'
+import { PARTIAL_FROM, type OnProgress } from './preview'
+
+/** The default partial schedule: every game from `PARTIAL_FROM` of the way through. */
+const lateGames = (played: number, total: number) =>
+  played < total && played >= Math.ceil(total * PARTIAL_FROM)
 import { lineOf, outranks, searchBestLine, type Alternative } from './search'
 import { inPlay, isBasicPokemon, signature, startNextTurn, type SimState } from './state'
 
@@ -46,8 +51,30 @@ export interface TurnsOptions {
   trials?: number
   seed?: number
   maxNodes?: number
-  onProgress?: (done: number, total: number) => void
+  onProgress?: OnProgress
   progressEvery?: number
+  /** Boards carried from turn to turn; `BEAM_WIDTH` unless a diagnostic asks for more. */
+  beamWidth?: number
+  /** From `PARTIAL_FROM` of the way through, the result so far after each game. */
+  onPartial?: (result: TurnsResult) => void
+  /** When a partial result is due; every game from `PARTIAL_FROM` on unless a measurement asks otherwise. */
+  partialAt?: (played: number, total: number) => boolean
+  /** Play only these deals (by trial number); the rest are skipped. For diagnostics. */
+  onlyTrials?: Set<number>
+  /** Each game as it finishes, in each turn order. For diagnostics. */
+  onGame?: (game: GameReport) => void
+}
+
+/** One game's outcome, for diagnostics (`scripts/diagnose-misses.ts`). */
+export interface GameReport {
+  trial: number
+  goingFirst: boolean
+  /** The turn the board came together, or null. */
+  turn: number | null
+  /** What the prizes took that the board needs; empty when nothing. */
+  prized: string[]
+  /** The best board the game ended on; null for a game the prizes stopped being played. */
+  final: SimState | null
 }
 
 /** The figures for one turn order. */
@@ -80,6 +107,8 @@ export interface TurnsExample {
   /** The turn the board came together, or null for a game that never did. */
   turn: number | null
   goingFirst: boolean
+  /** Which deal of the run it is, so it can be shared and played again. */
+  trial: number
   turns: TurnsExampleTurn[]
 }
 
@@ -124,6 +153,30 @@ export interface TurnsResult extends TurnsOrderDetail {
    * did (turn null), when there was one.
    */
   examples: TurnsExample[]
+  /** How the games that were played but never built it ended up. */
+  misses: TurnsMisses
+}
+
+/**
+ * Every game that had not built the board by the last turn, both turn orders
+ * together, and why: the prizes took a card it needs, or it was played out and
+ * the best board it reached fell short.
+ */
+export interface TurnsMisses {
+  /** How many such games, and their share of every game in either order. */
+  games: number
+  share: number
+  /** Share of those games the prizes made impossible. */
+  prized: number
+  /** Per part, over the games played out: the share that ended without it. Most often missing first. */
+  parts: { id: string; label: string; missing: number }[]
+  /** How complete the games played out got, most complete first; shares are of all misses. */
+  completion: { met: number; of: number; share: number }[]
+  /**
+   * The commonest outcomes, as shares of all misses: a combination of missing
+   * parts, or the cards the prizes took.
+   */
+  shortfalls: { missing: string[]; prized?: boolean; share: number }[]
 }
 
 /**
@@ -157,8 +210,8 @@ interface BranchTurn {
   line: Alternative
 }
 
-/** Best first, one per distinct board, at most BEAM_WIDTH. */
-function strongest(branches: Branch[]): Branch[] {
+/** Best first, one per distinct board, at most `width`. */
+function strongest(branches: Branch[], width = BEAM_WIDTH): Branch[] {
   const seen = new Set<string>()
   return branches
     .sort((a, b) => (outranks(a, b) ? -1 : outranks(b, a) ? 1 : 0))
@@ -168,7 +221,7 @@ function strongest(branches: Branch[]): Branch[] {
       seen.add(key)
       return true
     })
-    .slice(0, BEAM_WIDTH)
+    .slice(0, width)
 }
 
 /**
@@ -185,11 +238,12 @@ function turnsToBuild(
   labelFor: (cardKey: string) => string,
   maxNodes: number | undefined,
   goingFirst: boolean,
+  width = BEAM_WIDTH,
 ): GameOutcome {
   let searches = 0
   let truncatedSearches = 0
   const search = (started: SimState) => {
-    const result = searchBestLine(started, goal, ctx, labelFor, { maxNodes, keep: BEAM_WIDTH })
+    const result = searchBestLine(started, goal, ctx, labelFor, { maxNodes, keep: width })
     searches++
     if (!result.exhausted) truncatedSearches++
     return result
@@ -292,11 +346,12 @@ function gameOutcome(
 }
 
 /** Turn a game's history into an example: steps grouped by turn, plus frames. */
-function toTurnsExample(game: GameOutcome, goingFirst: boolean): TurnsExample {
+function toTurnsExample(game: GameOutcome, goingFirst: boolean, trial: number): TurnsExample {
   const turns = game.history.map((step): TurnsExampleTurn => {
-    const { steps, frames } = lineOf(step.line)
+    const { steps, frames, summaries } = lineOf(step.line)
     const plays = frames.map((state, i) => ({
       step: steps[i],
+      summary: summaries[i],
       board: toExampleBoard(state),
       hand: toHand(state.hand),
     }))
@@ -307,7 +362,14 @@ function toTurnsExample(game: GameOutcome, goingFirst: boolean): TurnsExample {
     }
     const opening: ExampleFrame[] = step.opening
       ? [
-          { step: 'Draw your opening hand', board: emptyBoard(7), hand: toHand(step.opening.hand) },
+          {
+            step: 'Draw your opening hand',
+            board: emptyBoard(
+              7,
+              step.opening.placed.deck.length + step.opening.placed.prizes.length,
+            ),
+            hand: toHand(step.opening.hand),
+          },
           {
             step: `Start with ${step.opening.placed.active!.card.label} in the Active Spot`,
             board: toExampleBoard(step.opening.placed),
@@ -315,11 +377,11 @@ function toTurnsExample(game: GameOutcome, goingFirst: boolean): TurnsExample {
           },
         ]
       : []
-    const all = [...opening, draw, ...plays]
+    const all = [...opening, draw, ...plays].map((frame) => ({ ...frame, turn: step.turn }))
     // The deal itself is a frame with no step of its own.
     return { turn: step.turn, steps: all.slice(step.opening ? 1 : 0).map((f) => f.step), frames: all }
   })
-  return { turn: game.turn, goingFirst, turns }
+  return { turn: game.turn, goingFirst, trial, turns }
 }
 
 interface GameOutcome {
@@ -335,6 +397,72 @@ interface GameOutcome {
   tierTurns: (number | null)[]
   /** The shown game's turns, as the search left them. */
   history: BranchTurn[]
+}
+
+/** How many of the commonest shortfalls are reported. */
+const SHORTFALLS = 3
+
+/** Running tally of how the games that never got there ended up. */
+class MissTally {
+  games = 0
+  /** Of `games`, the ones the prizes made impossible. */
+  prized = 0
+  readonly missing = new Map<string, { label: string; count: number }>()
+  readonly completion = new Map<string, { met: number; of: number; count: number }>()
+  readonly shortfalls = new Map<string, { missing: string[]; prized?: boolean; count: number }>()
+
+  /** A game the prizes made impossible, with the cards they took. */
+  addPrized(labels: string[]): void {
+    this.games++
+    this.prized++
+    const key = `prized\u0000${labels.join('\u0000')}`
+    const shortfall = this.shortfalls.get(key) ?? { missing: labels, prized: true, count: 0 }
+    shortfall.count++
+    this.shortfalls.set(key, shortfall)
+  }
+
+  add(game: GameOutcome): void {
+    if (game.turn !== null) return
+    // The best board the game ended on, as the search scored it.
+    const last = game.history[game.history.length - 1]
+    if (!last) return
+    const parts = last.line.score.parts
+    this.games++
+    const missing = parts.filter((part) => !part.met)
+    for (const part of parts) {
+      const entry = this.missing.get(part.id) ?? { label: part.label, count: 0 }
+      if (!part.met) entry.count++
+      this.missing.set(part.id, entry)
+    }
+    const met = parts.length - missing.length
+    const level = this.completion.get(`${met}/${parts.length}`) ?? { met, of: parts.length, count: 0 }
+    level.count++
+    this.completion.set(`${met}/${parts.length}`, level)
+    const key = missing.map((part) => part.id).join('\u0000')
+    const shortfall = this.shortfalls.get(key) ?? { missing: missing.map((part) => part.label), count: 0 }
+    shortfall.count++
+    this.shortfalls.set(key, shortfall)
+  }
+
+  result(gamesPlayed: number): TurnsMisses {
+    const of = (count: number) => count / Math.max(this.games, 1)
+    const ofPlayed = (count: number) => count / Math.max(this.games - this.prized, 1)
+    return {
+      games: this.games,
+      share: this.games / Math.max(gamesPlayed, 1),
+      prized: of(this.prized),
+      parts: [...this.missing]
+        .map(([id, entry]) => ({ id, label: entry.label, missing: ofPlayed(entry.count) }))
+        .sort((a, b) => b.missing - a.missing),
+      completion: [...this.completion.values()]
+        .map((level) => ({ met: level.met, of: level.of, share: of(level.count) }))
+        .sort((a, b) => b.met / b.of - a.met / a.of),
+      shortfalls: [...this.shortfalls.values()]
+        .sort((a, b) => b.count - a.count)
+        .slice(0, SHORTFALLS)
+        .map((entry) => ({ missing: entry.missing, prized: entry.prized, share: of(entry.count) })),
+    }
+  }
 }
 
 /** Running tally of the turn each game got there, for one order. */
@@ -426,6 +554,7 @@ export function turnsTest(
     turnsPlayed: 0,
     turnsTruncated: 0,
     examples: [],
+    misses: new MissTally().result(0),
   }
   if (deck.length < 13 || !deck.some(isBasicPokemon) || goalIsEmpty(goal)) return blank
 
@@ -437,6 +566,7 @@ export function turnsTest(
   const requirements = boardRequirements(goal, cards, labelFor)
   const essentials = boardRequirements(goal, cards, labelFor, 1)
   const locked = new PrizeLockTally()
+  const misses = new MissTally()
   const examples = new Map<string, TurnsExample>()
   // The goal's pieces never change between deals, so they are worked out once.
   const luck = luckCounters(buildContext(goal, () => 0, seed, cards).relevant)
@@ -447,7 +577,50 @@ export function turnsTest(
   let turnsPlayed = 0
   let turnsTruncated = 0
 
+  /** The result over the first `played` deals: the final one, or a partial one on the way. */
+  const summarize = (played: number): TurnsResult => {
+    const goingFirst = first.result(played)
+    const goingSecond = second.result(played)
+    // The fair-coin average: each turn's share is the mean of the two orders.
+    const secondParts = new Map(goingSecond.parts.map((part) => [part.id, part]))
+    const overall: TurnsOrderDetail = {
+      ...summarise(averageTurns(goingFirst.byTurn, goingSecond.byTurn)),
+      parts: goingFirst.parts.map((part) => ({
+        id: part.id,
+        label: part.label,
+        ...summarise(averageTurns(part.byTurn, secondParts.get(part.id)?.byTurn ?? emptyCounts())),
+      })),
+      tiers: goingFirst.tiers.map((tier, i) => ({
+        priority: tier.priority,
+        ...summarise(averageTurns(tier.byTurn, goingSecond.tiers[i].byTurn)),
+      })),
+    }
+    return {
+      ...overall,
+      trials: played,
+      goingFirst,
+      goingSecond,
+      prizeLocked: locked.stat(played),
+      luck: summariseLuck(luckRecords),
+      mulliganRate: deals === 0 ? 0 : mulligans / deals,
+      ignored,
+      truncated,
+      turnsPlayed,
+      turnsTruncated,
+      // Fastest first, going first before going second within a turn, and the
+      // game that never got there last.
+      examples: [...examples.values()].sort(
+        (a, b) =>
+          (a.turn ?? Infinity) - (b.turn ?? Infinity) || Number(b.goingFirst) - Number(a.goingFirst),
+      ),
+      // Each deal is played in both turn orders.
+      misses: misses.result(played * 2),
+    }
+  }
+
   for (let trial = 0; trial < trials; trial++) {
+    // Each deal depends only on its trial number, so skipping some is safe.
+    if (options.onlyTrials && !options.onlyTrials.has(trial)) continue
     const rng = mulberry32(seed + trial * 7919)
     let order = shuffled(deck, rng)
     deals++
@@ -465,20 +638,40 @@ export function turnsTest(
     if (locks.length > 0 && prizeLocks(essentials, deck, deal.prizes).length > 0) {
       first.locked++
       second.locked++
+      misses.addPrized(locks)
+      misses.addPrized(locks)
+      for (const goingFirst of [true, false]) {
+        options.onGame?.({ trial, goingFirst, turn: null, prized: locks, final: null })
+      }
       // Never built, in either turn order.
       luckRecords.push(luck.record(deal.hand, deal.prizes, null), luck.record(deal.hand, deal.prizes, null))
       if (options.onProgress && (trial + 1) % (options.progressEvery ?? 1) === 0) {
-        options.onProgress(trial + 1, trials)
+        options.onProgress(trial + 1, trials, {
+        kind: 'turns',
+        first: [...first.counts],
+        second: [...second.counts],
+      })
       }
       continue
     }
     const ctx: ActionContext = { ...buildContext(goal, rng, seed + trial, cards), multiTurn: true }
 
     const maxNodes = options.maxNodes ?? TURN_MAX_NODES
-    const asFirst = turnsToBuild(deal, goal, ctx, labelFor, maxNodes, true)
-    const asSecond = turnsToBuild(deal, goal, ctx, labelFor, maxNodes, false)
+    const asFirst = turnsToBuild(deal, goal, ctx, labelFor, maxNodes, true, options.beamWidth)
+    const asSecond = turnsToBuild(deal, goal, ctx, labelFor, maxNodes, false, options.beamWidth)
+    for (const [game, goingFirst] of [
+      [asFirst, true],
+      [asSecond, false],
+    ] as const) {
+      const last = game.history[game.history.length - 1]
+      options.onGame?.({ trial, goingFirst, turn: game.turn, prized: locks, final: last?.line.state ?? null })
+    }
     first.add(asFirst)
     second.add(asSecond)
+    for (const game of [asFirst, asSecond]) {
+      if (locks.length > 0) misses.addPrized(locks)
+      else misses.add(game)
+    }
     luckRecords.push(
       luck.record(deal.hand, deal.prizes, asFirst.turn),
       luck.record(deal.hand, deal.prizes, asSecond.turn),
@@ -490,50 +683,24 @@ export function turnsTest(
     ] as const) {
       // And one game that never got there, to show what held it back.
       const key = game.turn === null ? 'later' : `${game.turn}|${goingFirst}`
-      if (!examples.has(key)) examples.set(key, toTurnsExample(game, goingFirst))
+      if (!examples.has(key)) examples.set(key, toTurnsExample(game, goingFirst, trial))
     }
     if (asFirst.hitBudget || asSecond.hitBudget) truncated++
     turnsPlayed += asFirst.searches + asSecond.searches
     turnsTruncated += asFirst.truncatedSearches + asSecond.truncatedSearches
 
     if (options.onProgress && (trial + 1) % (options.progressEvery ?? 1) === 0) {
-      options.onProgress(trial + 1, trials)
+      options.onProgress(trial + 1, trials, {
+        kind: 'turns',
+        first: [...first.counts],
+        second: [...second.counts],
+      })
+    }
+    // Close to done, the full result is shown and updated game by game.
+    if (options.onPartial && (options.partialAt ?? lateGames)(trial + 1, trials)) {
+      options.onPartial(summarize(trial + 1))
     }
   }
 
-  const goingFirst = first.result(trials)
-  const goingSecond = second.result(trials)
-  // The fair-coin average: each turn's share is the mean of the two orders.
-  const secondParts = new Map(goingSecond.parts.map((part) => [part.id, part]))
-  const overall: TurnsOrderDetail = {
-    ...summarise(averageTurns(goingFirst.byTurn, goingSecond.byTurn)),
-    parts: goingFirst.parts.map((part) => ({
-      id: part.id,
-      label: part.label,
-      ...summarise(averageTurns(part.byTurn, secondParts.get(part.id)?.byTurn ?? emptyCounts())),
-    })),
-    tiers: goingFirst.tiers.map((tier, i) => ({
-      priority: tier.priority,
-      ...summarise(averageTurns(tier.byTurn, goingSecond.tiers[i].byTurn)),
-    })),
-  }
-  return {
-    ...overall,
-    trials,
-    goingFirst,
-    goingSecond,
-    prizeLocked: locked.stat(trials),
-    luck: summariseLuck(luckRecords),
-    mulliganRate: deals === 0 ? 0 : mulligans / deals,
-    ignored,
-    truncated,
-    turnsPlayed,
-    turnsTruncated,
-    // Fastest first, going first before going second within a turn, and the
-    // game that never got there last.
-    examples: [...examples.values()].sort(
-      (a, b) =>
-        (a.turn ?? Infinity) - (b.turn ?? Infinity) || Number(b.goingFirst) - Number(a.goingFirst),
-    ),
-  }
+  return summarize(trials)
 }

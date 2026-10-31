@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 
 import { BoardEditor } from './components/board/BoardEditor'
 import { PlaytestResults } from './components/board/PlaytestResults'
@@ -9,8 +9,9 @@ import { PrizeRisk } from './components/PrizeRisk'
 import { ResultsPanel } from './components/ResultsPanel'
 import { SampleHand } from './components/SampleHand'
 import { SensitivityTable } from './components/SensitivityTable'
-import { emptyGoal, type FieldGoal } from './lib/board/goal'
+import { emptyGoal, goalIsEmpty, type FieldGoal } from './lib/board/goal'
 import { cardDbMeta } from './lib/card-db'
+import { applyDesign, DESIGNS, savedDesign, type Design } from './lib/design'
 import { adjustLineCount } from './lib/edit-decklist'
 import {
   allRequirements,
@@ -28,7 +29,7 @@ import { usePlaytest, useTurns } from './lib/use-playtest'
 /** Identity of the deck's card set, ignoring copy counts. */
 const cardSignature = (keys: string[]): string => [...keys].sort().join('|')
 
-type Tab = 'hand' | 'board' | 'turns'
+type Tab = 'turns' | 'board' | 'hand'
 
 const TRIAL_CHOICES = [500, 1500, 4000] as const
 /**
@@ -42,7 +43,9 @@ export default function App() {
   const [condition, setCondition] = useState<Condition>([])
   const [goal, setGoal] = useState<FieldGoal>(emptyGoal())
   const [edited, setEdited] = useState(false)
-  const [tab, setTab] = useState<Tab>('hand')
+  const [tab, setTab] = useState<Tab>('turns')
+  const [design, setDesign] = useState<Design>(savedDesign)
+  useEffect(() => applyDesign(design), [design])
   const [trials, setTrials] = useState<number>(1500)
   const [turnTrials, setTurnTrials] = useState<number>(200)
 
@@ -108,25 +111,32 @@ export default function App() {
     [deferred],
   )
 
-  // The turn-1 playtest is far too slow for the main thread, so it runs in a
-  // worker and streams progress.
-  // Each runs only while its tab is open.
-  const playtest = usePlaytest(deck.cards, goal, trials, 1, tab === 'board')
-  const turns = useTurns(deck.cards, goal, turnTrials, 1, tab === 'turns')
+  // The simulations are far too slow for the main thread, so each runs in a
+  // worker and streams progress — when its Search button is pressed.
+  const playtest = usePlaytest(deck.cards, goal, trials, 1)
+  const turns = useTurns(deck.cards, goal, turnTrials, 1)
 
   const hasDeck = deck.cards.length > 0
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
-      <header className="mb-8">
-        <h1 className="text-3xl font-bold tracking-tight">Ideal Start</h1>
-        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-          Paste a PTCG Live export, then ask either question: what is in my opening hand, or what
-          board can I actually build by the end of turn 1.
-        </p>
+    <div className="min-h-screen">
+      <header className="app-header">
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4 px-4 py-6 sm:px-6">
+          <div className="flex min-w-0 items-center gap-3">
+            <BrandMark />
+            <div className="min-w-0">
+              <h1 className="text-3xl leading-none font-bold tracking-tight">Ideal Start</h1>
+              <p className="tagline mt-1.5 text-sm text-slate-600 dark:text-slate-400">
+                How fast does your deck set up? Paste a PTCG Live list and find out.
+              </p>
+            </div>
+          </div>
+          <DesignSwitch value={design} onChange={setDesign} />
+        </div>
       </header>
 
-      <main className="space-y-10">
+      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+      <main className="app-main space-y-10">
         <DeckImport text={text} deck={deck} onChange={setText} onAdjust={adjust} />
 
         {hasDeck && (
@@ -134,16 +144,16 @@ export default function App() {
             <div
               role="tablist"
               aria-label="What to analyse"
-              className="flex gap-1 border-b border-slate-200 dark:border-slate-800"
+              className="app-tabs flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-800"
             >
-              <Tab id="hand" active={tab} onSelect={setTab}>
-                Opening hand
+              <Tab id="turns" active={tab} onSelect={setTab}>
+                Turns to build
               </Tab>
               <Tab id="board" active={tab} onSelect={setTab}>
                 Turn 1 board
               </Tab>
-              <Tab id="turns" active={tab} onSelect={setTab}>
-                Turns to build
+              <Tab id="hand" active={tab} onSelect={setTab}>
+                Opening hand
               </Tab>
             </div>
 
@@ -170,32 +180,50 @@ export default function App() {
             ) : tab === 'turns' ? (
               <div role="tabpanel" className="space-y-10">
                 <BoardEditor cards={deck.cards} goal={goal} onChange={setGoal} horizon="turns" />
+                <SearchBar
+                  state={turns}
+                  empty={goalIsEmpty(goal)}
+                  trials={turnTrials}
+                  choices={TURN_TRIAL_CHOICES}
+                  onTrials={setTurnTrials}
+                />
                 <TurnsResults
                   goal={goal}
                   state={turns}
                   cards={deck.cards}
                   onFewer={
                     turnTrials > TURN_TRIAL_CHOICES[0]
-                      ? () => setTurnTrials(TURN_TRIAL_CHOICES[0])
+                      ? () => {
+                          setTurnTrials(TURN_TRIAL_CHOICES[0])
+                          turns.search({ trials: TURN_TRIAL_CHOICES[0] })
+                        }
                       : undefined
                   }
-                />
-                <TrialPicker
-                  value={turnTrials}
-                  choices={TURN_TRIAL_CHOICES}
-                  onChange={setTurnTrials}
                 />
               </div>
             ) : (
               <div role="tabpanel" className="space-y-10">
                 <BoardEditor cards={deck.cards} goal={goal} onChange={setGoal} />
+                <SearchBar
+                  state={playtest}
+                  empty={goalIsEmpty(goal)}
+                  trials={trials}
+                  choices={TRIAL_CHOICES}
+                  onTrials={setTrials}
+                />
                 <PlaytestResults
                   goal={goal}
                   state={playtest}
                   cards={deck.cards}
-                  onFewer={trials > TRIAL_CHOICES[0] ? () => setTrials(TRIAL_CHOICES[0]) : undefined}
+                  onFewer={
+                    trials > TRIAL_CHOICES[0]
+                      ? () => {
+                          setTrials(TRIAL_CHOICES[0])
+                          playtest.search({ trials: TRIAL_CHOICES[0] })
+                        }
+                      : undefined
+                  }
                 />
-                <TrialPicker value={trials} choices={TRIAL_CHOICES} onChange={setTrials} />
               </div>
             )}
           </>
@@ -210,35 +238,98 @@ export default function App() {
           still counts toward the deck but carries no card details.
         </p>
       </footer>
+      </div>
     </div>
   )
 }
 
-function TrialPicker({
-  value,
-  choices,
-  onChange,
-}: {
-  value: number
-  choices: readonly number[]
-  onChange: (trials: number) => void
-}) {
+/** A hand of three fanned cards: the opening hand the tool is about. */
+function BrandMark() {
   return (
-    <label className="flex items-center gap-2 text-xs text-slate-500">
-      Games played:
-      <select
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="rounded-md border border-slate-300 px-2 py-1 dark:border-slate-700 dark:bg-slate-950"
+    <svg viewBox="0 0 40 40" aria-hidden className="brand-mark h-10 w-10 shrink-0">
+      <rect x="5" y="9" width="16" height="23" rx="2.5" fill="currentColor" opacity="0.35" transform="rotate(-14 13 20)" />
+      <rect x="12" y="7" width="16" height="23" rx="2.5" fill="currentColor" opacity="0.65" />
+      <rect x="19" y="9" width="16" height="23" rx="2.5" fill="currentColor" transform="rotate(14 27 20)" />
+    </svg>
+  )
+}
+
+/** Which of the three designs the site wears. */
+function DesignSwitch({ value, onChange }: { value: Design; onChange: (design: Design) => void }) {
+  return (
+    <div
+      role="group"
+      aria-label="Design"
+      className="design-switch flex rounded-lg border border-slate-300 p-0.5 text-xs dark:border-slate-700"
+    >
+      {DESIGNS.map((design) => (
+        <button
+          key={design.id}
+          type="button"
+          aria-pressed={value === design.id}
+          onClick={() => onChange(design.id)}
+          className="rounded-md px-2.5 py-1 font-medium text-slate-600 transition-colors dark:text-slate-300"
+        >
+          {design.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * Starts the search, with how many games it plays. Nothing runs until it is
+ * pressed; after an edit it says the figures below describe the board as it
+ * was.
+ */
+function SearchBar({
+  state,
+  empty,
+  trials,
+  choices,
+  onTrials,
+}: {
+  state: { running: boolean; result: unknown; stale: boolean; search: () => void }
+  empty: boolean
+  trials: number
+  choices: readonly number[]
+  onTrials: (trials: number) => void
+}) {
+  const { running, result, stale, search } = state
+  const label = running ? 'Restart search' : result ? 'Search again' : 'Search'
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+      <button
+        type="button"
+        onClick={() => search()}
+        disabled={empty}
+        className="rounded-lg bg-sky-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-40"
       >
-        {choices.map((count) => (
-          <option key={count} value={count}>
-            {count.toLocaleString()}
-          </option>
-        ))}
-      </select>
-      more games narrows the margin of error
-    </label>
+        {label}
+      </button>
+      <label className="flex items-center gap-2 text-xs text-slate-500">
+        Games:
+        <select
+          value={trials}
+          onChange={(e) => onTrials(Number(e.target.value))}
+          className="rounded-md border border-slate-300 px-2 py-1 dark:border-slate-700 dark:bg-slate-950"
+        >
+          {choices.map((count) => (
+            <option key={count} value={count}>
+              {count.toLocaleString()}
+            </option>
+          ))}
+        </select>
+        more games narrows the margin of error
+      </label>
+      {empty ? (
+        <p className="w-full text-xs text-slate-500">Put something on the board to search it.</p>
+      ) : stale && !running ? (
+        <p data-testid="search-stale" className="w-full text-xs font-medium text-amber-700 dark:text-amber-400">
+          The board has changed since these results. Search again to update them.
+        </p>
+      ) : null}
+    </div>
   )
 }
 

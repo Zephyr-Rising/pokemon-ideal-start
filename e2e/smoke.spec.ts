@@ -54,6 +54,7 @@ test('loads the example deck and reports the odds', async ({ page }) => {
   await expect(page.getByTestId('headline-probability')).toBeHidden()
 
   await page.getByRole('button', { name: 'Load example' }).click()
+  await page.getByRole('tab', { name: 'Opening hand' }).click()
 
   // --- Deck resolved: the printed section counts must come back exactly.
   await expect(page.getByText('60/60 cards')).toBeVisible()
@@ -106,6 +107,7 @@ test('shows an example hand, and one that misses', async ({ page }) => {
   await page.goto('./')
   await expect(page.getByRole('heading', { name: 'Ideal Start', level: 1 })).toBeVisible()
   await page.getByRole('button', { name: 'Load example' }).click()
+  await page.getByRole('tab', { name: 'Opening hand' }).click()
 
   const sample = page.locator('section').filter({ hasText: 'What that looks like' }).last()
   await expect(sample.getByRole('heading', { name: /What that looks like/ })).toBeVisible()
@@ -132,6 +134,7 @@ test('adjusts a card count from the deck list', async ({ page }) => {
   await page.goto('./')
   await expect(page.getByRole('heading', { name: 'Ideal Start', level: 1 })).toBeVisible()
   await page.getByRole('button', { name: 'Load example' }).click()
+  await page.getByRole('tab', { name: 'Opening hand' }).click()
   await expect(page.getByText('60/60 cards')).toBeVisible()
 
   const decklist = page.getByRole('textbox', { name: 'Paste a PTCG Live decklist export' })
@@ -153,6 +156,7 @@ test('clearing the decklist returns to the empty state', async ({ page }) => {
   await page.goto('./')
   await expect(page.getByRole('heading', { name: 'Ideal Start', level: 1 })).toBeVisible()
   await page.getByRole('button', { name: 'Load example' }).click()
+  await page.getByRole('tab', { name: 'Opening hand' }).click()
   await expect(page.getByTestId('headline-probability')).toBeVisible()
 
   await page.getByRole('button', { name: 'Clear' }).click()

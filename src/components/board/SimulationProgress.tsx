@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
 
+import type { ProgressPreview } from '../../lib/sim/preview'
+import { PreviewChart } from './PreviewChart'
+
 /** Past this, a run is slow enough to explain and to offer a quicker one. */
 const SLOW_MS = 10_000
 /** The window the recent pace is measured over. */
@@ -17,6 +20,8 @@ interface Props {
   updating: boolean
   /** Switch to the smallest game count; absent when already there. */
   onFewer?: () => void
+  /** The run's totals so far, drawn as a preview of the result. */
+  preview?: ProgressPreview | null
 }
 
 const seconds = (ms: number): string => {
@@ -31,7 +36,14 @@ const seconds = (ms: number): string => {
  * runs: every game is the same kind of work, so the rate barely drifts. Until
  * a few games are in, it says nothing rather than guessing.
  */
-export function SimulationProgress({ progress, total, startedAt, updating, onFewer }: Props) {
+export function SimulationProgress({
+  progress,
+  total,
+  startedAt,
+  updating,
+  onFewer,
+  preview = null,
+}: Props) {
   const [now, setNow] = useState(() => performance.now())
   useEffect(() => {
     const id = window.setInterval(() => setNow(performance.now()), 500)
@@ -101,6 +113,7 @@ export function SimulationProgress({ progress, total, startedAt, updating, onFew
           style={{ width: `${share * 100}%` }}
         />
       </div>
+      <PreviewChart preview={preview} done={progress} />
       {slow && (
         <p className="text-xs">
           This board is taking a while: each game searches every line of play, and a board that

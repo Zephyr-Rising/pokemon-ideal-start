@@ -14,6 +14,11 @@ async function stubCardArt(page: Page) {
   )
 }
 
+/** Press Search: nothing is played out until it is. */
+async function search(page: Page) {
+  await page.getByRole('button', { name: /^(Search|Search again|Restart search)$/ }).click()
+}
+
 async function openBoard(page: Page) {
   await stubCardArt(page)
   await page.goto('./')
@@ -41,6 +46,11 @@ test('builds a board by tapping, and plays it out', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Remove Mega Kangaskhan ex' })).toBeVisible()
 
   await page.getByLabel('Minimum benched Pokémon').fill('3')
+
+  // Nothing runs until Search is pressed.
+  await expect(page.getByText('Press Search to play this board out')).toBeVisible()
+  await expect(page.getByTestId('simulation-progress')).toHaveCount(0)
+  await search(page)
 
   const headline = page.getByTestId('playtest-probability')
   await expect(headline).toBeVisible({ timeout: 60_000 })
@@ -72,11 +82,16 @@ test('a harder board is never more likely than an easier one', async ({ page }) 
   await openBoard(page)
 
   await page.getByLabel('Minimum benched Pokémon').fill('2')
+  await search(page)
   const headline = page.getByTestId('playtest-probability')
   await expect(headline).toBeVisible({ timeout: 60_000 })
   const easy = Number.parseFloat((await headline.textContent())!.replace('%', ''))
 
   await page.getByLabel('Minimum benched Pokémon').fill('5')
+  // The old figures stay, marked as describing the board before the edit.
+  await expect(page.getByTestId('search-stale')).toBeVisible()
+  await search(page)
+  await expect(page.getByTestId('search-stale')).toHaveCount(0)
   await expect
     .poll(async () => Number.parseFloat((await headline.textContent())!.replace('%', '')), {
       timeout: 60_000,
@@ -87,6 +102,7 @@ test('a harder board is never more likely than an easier one', async ({ page }) 
 test('says which cards it cannot play', async ({ page }) => {
   await openBoard(page)
   await page.getByLabel('Minimum benched Pokémon').fill('2')
+  await search(page)
   await expect(page.getByTestId('playtest-probability')).toBeVisible({ timeout: 60_000 })
 
   const details = page.locator('details').filter({ hasText: 'treated as doing nothing' })
@@ -113,9 +129,12 @@ test('replays the line a move at a time, from the opening hand', async ({ page }
   await page.getByRole('button', { name: 'Pick Mega Kangaskhan ex' }).click()
   await page.getByRole('button', { name: 'Place in Active spot' }).click()
   await page.getByLabel('Minimum benched Pokémon').fill('2')
+  await search(page)
 
   const replay = page.getByTestId('replay')
   await expect(replay).toBeVisible({ timeout: 60_000 })
+  // Results show from 80% of games and keep updating; wait for the last.
+  await expect(page.getByTestId('simulation-progress')).toHaveCount(0, { timeout: 60_000 })
 
   // It opens on the deal: a full hand of seven, nothing on the table yet.
   await expect(replay.getByText('Draw your opening hand')).toBeVisible()
@@ -154,9 +173,12 @@ test('shows a different route on request, rewound to its first move', async ({ p
   await page.getByRole('button', { name: 'Pick Mega Kangaskhan ex' }).click()
   await page.getByRole('button', { name: 'Place in Active spot' }).click()
   await page.getByLabel('Minimum benched Pokémon').fill('2')
+  await search(page)
 
   const line = page.getByTestId('example-line')
   await expect(line).toBeVisible({ timeout: 60_000 })
+  // Results show from 80% of games and keep updating; wait for the last.
+  await expect(page.getByTestId('simulation-progress')).toHaveCount(0, { timeout: 60_000 })
 
   const another = line.getByRole('button', { name: 'Another way' })
   // A deck this open reaches the board several ways, so the control should be
@@ -213,9 +235,12 @@ test('shows how many turns a board takes, in its own tab', async ({ page }) => {
   await page.getByRole('button', { name: 'Pick Mega Kangaskhan ex' }).click()
   await page.getByRole('button', { name: 'Place in Active spot' }).click()
   await page.getByLabel('Minimum benched Pokémon').fill('2')
+  await search(page)
 
   // A run in flight shows how far it has got.
   await expect(page.getByTestId('simulation-progress').getByRole('progressbar')).toBeVisible()
+  // And, below it, how the result is shaping up so far.
+  await expect(page.getByTestId('progress-preview')).toBeVisible({ timeout: 30_000 })
 
   const median = page.getByTestId('turns-median')
   await expect(median).toBeVisible({ timeout: 90_000 })
@@ -258,6 +283,7 @@ test('says how often the prizes make the board impossible', async ({ page }) => 
   // A single copy: about one game in ten has it prized.
   await page.getByRole('button', { name: 'Pick Fezandipiti ex' }).click()
   await page.getByRole('button', { name: 'Place in Bench' }).click()
+  await search(page)
   const note = page.getByTestId('prize-note')
   await expect(note).toBeVisible({ timeout: 60_000 })
   await expect(note).toContainText('Fezandipiti ex')
@@ -273,6 +299,7 @@ test('builds a board with a Tool on it', async ({ page }) => {
   await page.getByRole('button', { name: 'Place in Active spot' }).click()
   await page.getByRole('button', { name: 'Pick Air Balloon' }).click()
   await page.getByRole('button', { name: 'Attach to Grookey' }).click()
+  await search(page)
 
   // The Tool is part of the board, and some games build it.
   await expect(
@@ -301,6 +328,7 @@ test('reports partial success once a part is less than essential', async ({ page
   await expect(
     page.getByRole('button', { name: 'Set priority for Fezandipiti ex' }).getByText('Nice to have'),
   ).toBeVisible()
+  await search(page)
 
   const partial = page.getByTestId('partial-success')
   await expect(partial).toBeVisible({ timeout: 60_000 })
@@ -337,6 +365,7 @@ test('marks an either/or alternative from the card popover', async ({ page }) =>
   await page.getByTestId('priority-popover').getByRole('button', { name: 'Done' }).click()
   // The card says so, and the board part reads as either/or.
   await expect(page.getByText('or Latias ex')).toBeVisible()
+  await search(page)
   await expect(
     page.getByTestId('board-parts').getByText('Fezandipiti ex or Latias ex benched'),
   ).toBeVisible({ timeout: 60_000 })
@@ -364,6 +393,7 @@ test('builds an either/or across zones by tapping', async ({ page }) => {
   const label =
     "Ciphermaniac's Codebreaking still in hand, or Area Zero Underdepths in play and Glass Trumpet still in hand"
   await expect(choices.getByText(label)).toBeVisible()
+  await search(page)
   await expect(page.getByTestId('board-parts').getByText(label).first()).toBeVisible({ timeout: 60_000 })
 })
 
@@ -372,6 +402,7 @@ test('asks for a number of cards in hand', async ({ page }) => {
   await page.getByRole('button', { name: 'Pick Mega Kangaskhan ex' }).click()
   await page.getByRole('button', { name: 'Place in Active spot' }).click()
   await page.getByLabel('Minimum cards in hand').fill('5')
+  await search(page)
   await expect(page.getByTestId('board-parts').getByText('5 or more cards in hand').first()).toBeVisible({
     timeout: 60_000,
   })
@@ -385,10 +416,11 @@ test('asks for a number of cards in hand', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Priority of 5 or more cards in hand' })).toHaveText(
     'Nice to have',
   )
+  await search(page)
   await expect(page.getByTestId('partial-success')).toBeVisible({ timeout: 60_000 })
 })
 
-test('a board change mid-run starts the new run straight away', async ({ page }) => {
+test('searching again mid-run starts the new run straight away', async ({ page }) => {
   test.setTimeout(120_000)
   await stubCardArt(page)
   await page.goto('./')
@@ -396,12 +428,14 @@ test('a board change mid-run starts the new run straight away', async ({ page })
   await page.getByRole('tab', { name: 'Turns to build' }).click()
   await page.getByRole('button', { name: 'Pick Dragapult ex' }).click()
   await page.getByRole('button', { name: 'Place in Active spot' }).click()
+  await search(page)
   const progress = page.getByTestId('simulation-progress')
   await expect(progress.getByText(/games\/s/)).toBeVisible({ timeout: 30_000 })
 
   // Change the board while that run is still going.
   await page.getByRole('button', { name: 'Pick Munkidori' }).click()
   await page.getByRole('button', { name: 'Place in Bench' }).click()
+  await page.getByRole('button', { name: 'Restart search' }).click()
   // The new run starts from zero, then shows games completing within seconds,
   // rather than sitting at zero until the old run finishes in the background.
   await expect(progress.getByText(/200 games… 0 done/)).toBeVisible({ timeout: 5_000 })
@@ -424,6 +458,7 @@ test('sets the priority of one Energy on a Pokémon', async ({ page }) => {
     .click()
   await page.getByTestId('priority-popover').getByRole('button', { name: 'Done' }).click()
 
+  await search(page)
   // One Energy is essential, both together are only nice to have.
   const parts = page.getByTestId('board-parts')
   await expect(parts.getByText('Grass Energy on the Active').first()).toBeVisible({ timeout: 60_000 })
@@ -432,6 +467,8 @@ test('sets the priority of one Energy on a Pokémon', async ({ page }) => {
 })
 
 test('shows when each priority level comes together', async ({ page }) => {
+  // A full Turns to build run; Run Errand draws every turn, so the hands are big.
+  test.setTimeout(120_000)
   await stubCardArt(page)
   await page.goto('./')
   await page.getByRole('button', { name: 'Load example' }).click()
@@ -446,6 +483,7 @@ test('shows when each priority level comes together', async ({ page }) => {
     .getByRole('button', { name: 'Nice to have' })
     .click()
   await page.getByTestId('priority-popover').getByRole('button', { name: 'Done' }).click()
+  await search(page)
 
   const card = page.getByTestId('turns-distribution-card')
   const toggle = card.getByRole('group', { name: 'Priority level shown' })
@@ -455,4 +493,27 @@ test('shows when each priority level comes together', async ({ page }) => {
   await toggle.getByRole('button', { name: 'Essential parts' }).click()
   await expect(toggle.getByRole('button', { name: 'Essential parts' })).toHaveAttribute('aria-pressed', 'true')
   await expect(card.getByText('How often essential parts first come together')).toBeVisible()
+})
+
+test('asks for the Supporter to be still free, alone or in an either/or', async ({ page }) => {
+  await openBoard(page)
+  await page.getByRole('button', { name: 'Pick Mega Kangaskhan ex' }).click()
+  await page.getByRole('button', { name: 'Place in Active spot' }).click()
+  await page.getByLabel('Supporter still free').check()
+  await expect(page.getByRole('button', { name: 'Priority of Supporter still free' })).toBeVisible()
+
+  // A condition with no card to tap joins an either/or from its own button.
+  await page.getByLabel('Minimum cards in hand').fill('6')
+  const choices = page.getByTestId('choices')
+  await choices.getByRole('button', { name: 'Either/or across zones' }).click()
+  await choices.getByRole('group', { name: 'Conditions' }).getByRole('button', { name: 'Supporter still free' }).click()
+  await choices.getByRole('button', { name: 'Or…' }).click()
+  await choices.getByRole('group', { name: 'Conditions' }).getByRole('button', { name: '6 or more cards in hand' }).click()
+  await choices.getByRole('button', { name: 'Save' }).click()
+  await expect(choices.getByText('Supporter still free, or 6 or more cards in hand')).toBeVisible()
+
+  await search(page)
+  await expect(
+    page.getByTestId('board-parts').getByText('Supporter still free, or 6 or more cards in hand').first(),
+  ).toBeVisible({ timeout: 60_000 })
 })

@@ -1,4 +1,15 @@
 import { findBasicEnergyByName, findByName, findByPrinting, isNonStandard } from './card-db'
+
+/** Earlier stages from `prev` back to the Basic, nearest first (at most two). */
+function lineageOf(prev: string): string[] {
+  const names: string[] = []
+  let name: string | undefined = prev
+  while (name && names.length < 2) {
+    names.push(name)
+    name = findByName(name)?.prev || undefined
+  }
+  return names
+}
 import { norm } from './normalize'
 import { parseDecklist } from './parse-decklist'
 import type { CardRecord, Deck, DeckCard, ResolvedEntry } from './types'
@@ -118,6 +129,7 @@ function aggregate(entries: ResolvedEntry[]): DeckCard[] {
       card: entry.card,
       printings: [printing],
       tags: entry.card?.tags ?? [],
+      ...(entry.card?.prev ? { lineage: lineageOf(entry.card.prev) } : {}),
     })
   }
 

@@ -102,6 +102,44 @@ describe('Buddy-Buddy Poffin', () => {
   })
 })
 
+describe('Precious Trolley', () => {
+  const lines = (...wanted: [string, number][]) =>
+    wanted.map(([key, needed]) => ({ keys: new Set([key]), needed }))
+
+  it('benches what the goal still needs first, offering each stopping point', () => {
+    const s = state({
+      active: inPlay(exMon('genesect')),
+      deck: [basic('drilbur'), basic('drilbur'), basic('beldum'), basic('beldum'), exMon('genesect')],
+    })
+    const c = ctx({
+      relevant: new Set(['drilbur', 'beldum', 'genesect']),
+      wantsAnyBench: false,
+      goalLines: lines(['beldum', 2], ['drilbur', 1], ['genesect', 1]),
+    })
+    const results = play('Precious Trolley', s, c)
+    // One board per Pokémon benched, each a prefix of the next.
+    expect(results.map((r) => r.bench.length)).toEqual([1, 2, 3, 4, 5])
+    // The first four are the board: an Active Genesect ex fills no Bench spot,
+    // and the second Drilbur comes only after it.
+    expect(keys(results[3].bench.map((slot) => slot.card)).sort()).toEqual([
+      'beldum',
+      'beldum',
+      'drilbur',
+      'genesect',
+    ])
+  })
+
+  it('stops at the bench cap, and never benches a card wanted in hand', () => {
+    const s = state({
+      bench: Array.from({ length: 4 }, (_, i) => inPlay(basic(`b${i}`))),
+      deck: [basic('kept'), basic('a'), basic('b')],
+    })
+    const results = play('Precious Trolley', s, ctx({ handOnly: new Set(['kept']) }))
+    expect(results.every((r) => r.bench.length === 5)).toBe(true)
+    expect(results.flatMap((r) => keys(r.bench.map((slot) => slot.card)))).not.toContain('kept')
+  })
+})
+
 describe('Fighting Gong', () => {
   // A goal that names neither half of the Lunar Cycle engine, nor any Energy.
   const goalOnly = ctx({ relevant: new Set(['target']), wantsAnyBench: false, wantsEnergy: false })
@@ -594,6 +632,32 @@ describe("Team Rocket's Petrel", () => {
     expect(fetched).toEqual(expect.arrayContaining([['ultra-ball'], ['target']]))
     // Never a Supporter nobody asked for: Petrel already used the turn's one.
     expect(fetched.flat()).not.toContain("boss's-orders")
+  })
+})
+
+describe("Team Rocket's Transceiver", () => {
+  it('fetches a Team Rocket Supporter, and nothing else', () => {
+    const s = state({
+      deck: [
+        trainer("Team Rocket's Petrel", 'supporter'),
+        trainer("Team Rocket's Petrel", 'supporter'),
+        trainer('Cyrano', 'supporter'),
+        trainer('Precious Trolley', 'item'),
+      ],
+    })
+    const fetched = play("Team Rocket's Transceiver", s, ctx({ wantsAnyBench: false })).map((r) =>
+      keys(r.hand),
+    )
+    expect(fetched).toEqual([["team-rocket's-petrel"]])
+  })
+})
+
+describe("Team Rocket's Petrel into Precious Trolley", () => {
+  it('fetches Precious Trolley, now that it can be played', () => {
+    const s = state({ deck: [trainer('Precious Trolley', 'item')] })
+    const c = ctx({ relevant: new Set(['target']), wantsAnyBench: false, wantsEnergy: false })
+    const fetched = play("Team Rocket's Petrel", s, c).map((r) => keys(r.hand))
+    expect(fetched).toEqual([['precious-trolley']])
   })
 })
 

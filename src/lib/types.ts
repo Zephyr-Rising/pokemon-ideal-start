@@ -103,6 +103,12 @@ export interface DeckCard {
   /** Printings seen in the decklist, e.g. ['MEG 131', 'SVI 196']. */
   printings: string[]
   tags: string[]
+  /**
+   * An evolution's earlier stages, nearest first, by canonical name, from the
+   * card database — including stages the deck does not run, such as the
+   * Prinplup that Rare Candy skips on the way to Empoleon ex.
+   */
+  lineage?: string[]
 }
 
 export interface Deck {

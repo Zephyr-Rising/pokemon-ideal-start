@@ -63,6 +63,39 @@ const CASES: Case[] = [
     build: (c) => goal({ active: slot(keyOf(c, 'Teal Mask Ogerpon ex'), ['{G}', '{G}']) }),
   },
   {
+    name: 'kangaskhan turns: Raging Bolt ex Active with {L}{F}',
+    deck: 'mega-kangaskhan',
+    mode: 'turns',
+    trials: 60,
+    build: (c) => goal({ active: slot(keyOf(c, 'Raging Bolt ex'), ['{L}', '{F}']) }),
+  },
+  {
+    name: "kangaskhan turns: Lillie's Clefairy ex Active with {P} + any, 8 benched",
+    deck: 'mega-kangaskhan',
+    mode: 'turns',
+    trials: 30,
+    build: (c) =>
+      goal({
+        active: slot(keyOf(c, "Lillie's Clefairy ex"), ['{P}', null]),
+        benchMin: 8,
+      }),
+  },
+  {
+    name: 'metal: 2 Beldum, Drilbur, Genesect ex benched (Precious Trolley, Petrel)',
+    deck: 'metal-petrel',
+    mode: 'board',
+    trials: 200,
+    build: (c) =>
+      goal({
+        bench: [
+          slot(keyOf(c, 'Beldum')),
+          slot(keyOf(c, 'Beldum')),
+          slot(keyOf(c, 'Drilbur')),
+          slot(keyOf(c, 'Genesect ex')),
+        ],
+      }),
+  },
+  {
     name: 'dragapult: Dreepy Active + Munkidori + Fezandipiti',
     deck: 'dragapult-munkidori',
     mode: 'board',

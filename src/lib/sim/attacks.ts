@@ -1,7 +1,9 @@
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
-import type { EffectContext } from './effects'
+import { distinctCards } from './deck-look'
+import { benchFromDeck, isPlayableSupporter, type EffectContext } from './effects'
 import {
+  benchCap,
   cloneState,
   energyProvides,
   fairShuffle,
@@ -30,24 +32,70 @@ import {
 export interface AttackDef {
   /** Every board the attack can lead to. */
   apply: (state: SimState, ctx: EffectContext) => SimState[]
+  /**
+   * "If you go first, you can use this attack during your first turn." (Quick
+   * Gift, Precocious Evolution, Quick Sign)
+   */
+  firstTurn?: boolean
 }
 
 const ATTACKS = new Map<string, AttackDef>()
 
+/**
+ * Attacks keyed on their exact printed text rather than their name: many
+ * attacks share a name with different wording ("Call Sign" fetches one Pokémon
+ * on Cryogonal and three on Kirlia), so each wording is registered on its own
+ * and anything else stays inert.
+ */
+const BY_TEXT = new Map<string, AttackDef>()
+
+const textKey = (text: string): string => text.replace(/\s+/g, ' ').trim()
+
+/** Register an attack by its exact printed text. */
+export function registerAttackText(text: string, def: AttackDef): void {
+  BY_TEXT.set(textKey(text), def)
+}
+
+/** Every text registered, for the test that each matches a printed card. */
+export const registeredAttackTexts = (): string[] => [...BY_TEXT.keys()]
+
+/** Per card, since the search asks millions of times. */
+const attackCache = new WeakMap<
+  DeckCard,
+  { name: string; cost: string; def: AttackDef } | null
+>()
+
 /** The searching attack this Pokémon has, with its printed cost, if any. */
 export function attackOf(card: DeckCard): { name: string; cost: string; def: AttackDef } | undefined {
+  const cached = attackCache.get(card)
+  if (cached !== undefined) return cached ?? undefined
+  let found: { name: string; cost: string; def: AttackDef } | undefined
   for (const move of card.card?.moves ?? []) {
-    const def = ATTACKS.get(move.name)
-    if (def) return { name: move.name, cost: move.cost, def }
+    const def = ATTACKS.get(move.name) ?? BY_TEXT.get(textKey(move.effect ?? ''))
+    if (def) {
+      found = { name: move.name, cost: move.cost, def }
+      break
+    }
   }
-  return undefined
+  attackCache.set(card, found ?? null)
+  return found
+}
+
+/**
+ * The turn's attack is not ruled out: not made yet, and not the first turn of
+ * the player going first — unless this attack says it may be.
+ */
+export function mayAttack(state: SimState): boolean {
+  if (state.attacked || !state.active) return false
+  if (!state.cannotAttack) return true
+  return attackOf(state.active.card)?.def.firstTurn === true
 }
 
 /** Can the Active Pokémon attack with it right now? */
 export function attackAvailable(state: SimState): boolean {
-  if (state.attacked || state.cannotAttack || !state.active) return false
-  const attack = attackOf(state.active.card)
-  return attack !== undefined && costPaid(attack.cost, state.active)
+  if (!mayAttack(state)) return false
+  const attack = attackOf(state.active!.card)
+  return attack !== undefined && costPaid(attack.cost, state.active!)
 }
 
 /**
@@ -98,6 +146,49 @@ ATTACKS.set('Traverse Time', {
     next.deck = fairShuffle(state, next.deck, ctx.seed)
     next.shuffles = shufflesAfter(state)
     return [next]
+  },
+})
+
+/** The printed text of the Active's attack of this name. */
+const printedText = (state: SimState, attack: string): string =>
+  (state.active?.card.card?.moves ?? []).find((move) => move.name === attack)?.effect ?? ''
+
+// "Search your deck for a Basic Pokémon and put it onto your Bench." (Eevee,
+// Litwick, ...) or "...for up to 2 Basic Pokémon and put them onto your
+// Bench." (Drilbur, Oricorio, ...). Then, shuffle your deck. Any other wording
+// is not this attack, and does nothing rather than guess.
+ATTACKS.set('Call for Family', {
+  apply: (state, ctx) => {
+    const text = printedText(state, 'Call for Family')
+    const max = text.startsWith('Search your deck for up to 2 Basic Pokémon and put them onto your Bench')
+      ? 2
+      : text.startsWith('Search your deck for a Basic Pokémon and put it onto your Bench')
+        ? 1
+        : 0
+    if (max === 0 || state.bench.length >= benchCap(state)) return []
+    const boards = benchFromDeck(state, ctx, max, () => true)
+    // Benching nothing is not worth an attack.
+    return boards.filter((board) => board.bench.length > state.bench.length)
+  },
+})
+
+// "Search your deck for a Supporter card, reveal it, and put it into your
+// hand. Then, shuffle your deck." (Piplup) Any Supporter worth having: one the
+// goal names, else one the simulator can play — next turn, since this attack
+// ends this one.
+ATTACKS.set('Call for Support', {
+  apply: (state, ctx) => {
+    const supporters = state.deck.filter((card) => card.tags.includes('supporter'))
+    const wanted = supporters.filter((card) => ctx.relevant.has(card.key))
+    const found = distinctCards(wanted.length > 0 ? wanted : supporters.filter(isPlayableSupporter))
+    return found.map((card) => {
+      const next = cloneState(state)
+      next.deck.splice(next.deck.indexOf(card), 1)
+      next.hand.push(card)
+      next.deck = fairShuffle(next, next.deck, ctx.seed)
+      next.shuffles = shufflesAfter(next)
+      return next
+    })
   },
 })
 

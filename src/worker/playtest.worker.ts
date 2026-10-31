@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 import type { FieldGoal } from '../lib/board/goal'
 import { playtest, type PlaytestResult } from '../lib/sim/playtest'
+import type { ProgressPreview } from '../lib/sim/preview'
 import { turnsTest, type TurnsResult } from '../lib/sim/turns'
 import type { DeckCard } from '../lib/types'
 
@@ -27,15 +28,19 @@ export interface PlaytestRequest {
   trials: number
   seed: number
   maxNodes?: number
+  /** Play only these deals: one shared game, replayed. */
+  onlyTrials?: number[]
 }
 
 export type PlaytestResponse =
-  | { id: number; kind: 'progress'; done: number; total: number }
+  | { id: number; kind: 'progress'; done: number; total: number; preview?: ProgressPreview }
   | { id: number; kind: 'done'; result: PlaytestResult | TurnsResult }
+  /** The result so far, once the run is most of the way through. */
+  | { id: number; kind: 'partial'; result: PlaytestResult | TurnsResult }
   | { id: number; kind: 'error'; message: string }
 
 self.onmessage = (event: MessageEvent<PlaytestRequest>) => {
-  const { id, mode, cards, goal, trials, seed, maxNodes } = event.data
+  const { id, mode, cards, goal, trials, seed, maxNodes, onlyTrials } = event.data
   const post = (message: PlaytestResponse) => self.postMessage(message)
 
   try {
@@ -45,7 +50,10 @@ self.onmessage = (event: MessageEvent<PlaytestRequest>) => {
       trials,
       seed,
       maxNodes,
-      onProgress: (done: number, total: number) => post({ id, kind: 'progress', done, total }),
+      ...(onlyTrials ? { onlyTrials: new Set(onlyTrials) } : {}),
+      onProgress: (done: number, total: number, preview?: ProgressPreview) =>
+        post({ id, kind: 'progress', done, total, preview }),
+      onPartial: (result: PlaytestResult | TurnsResult) => post({ id, kind: 'partial', result }),
     }
     const result =
       mode === 'turns' ? turnsTest(cards, goal, labelFor, options) : playtest(cards, goal, labelFor, options)

@@ -390,6 +390,7 @@ describe('draw and board view', () => {
       bench: [{ cardKey: 'budew', energy: [], tools: [] }],
       stadiumKey: null,
       hand: ['x'],
+      supporterUsed: false,
     })
   })
 })

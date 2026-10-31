@@ -33,15 +33,22 @@ export function PlaytestResults({ goal, state, cards, onFewer }: Props) {
     )
   }
 
-  const { result, running, progress, total, startedAt, error } = state
+  const { result, running, progress, total, startedAt, error, stale, preview } = state
 
   return (
-    <section className="space-y-3">
+    // Figures for a board that has since changed stay readable, but dimmed.
+    <section className={`space-y-3 transition-opacity ${stale && !running ? 'opacity-55' : ''}`}>
       <h2 className="text-lg font-semibold">3 · How often you get there</h2>
 
       {error && (
         <p className="rounded-md bg-rose-50 px-3 py-2 text-xs text-rose-900 dark:bg-rose-950/40 dark:text-rose-200">
           The playtest failed: {error}
+        </p>
+      )}
+
+      {!result && !running && !error && (
+        <p className="rounded-lg bg-slate-100 px-3 py-6 text-center text-sm text-slate-600 dark:bg-slate-900 dark:text-slate-400">
+          Press Search to play this board out and see how often your deck builds it by the end of turn 1.
         </p>
       )}
 
@@ -52,6 +59,7 @@ export function PlaytestResults({ goal, state, cards, onFewer }: Props) {
           startedAt={startedAt}
           updating={result !== null}
           onFewer={onFewer}
+          preview={preview}
         />
       )}
 
@@ -158,7 +166,7 @@ export function PlaytestResults({ goal, state, cards, onFewer }: Props) {
           {result.examples.length > 0 && (
             <Routes
               // Remount on a fresh run so the shown route resets to the first.
-              key={`${result.trials}-${result.examples.length}-${result.examples[0].steps[0] ?? ''}`}
+              key={state.runId}
               examples={result.examples}
               cards={cards}
             />

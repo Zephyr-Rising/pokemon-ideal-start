@@ -18,6 +18,7 @@ import {
   removeTool,
   setBenchMin,
   setEnergyMin,
+  setSupporterFree,
   setHandMin,
   removeSlotEnergy,
   addChoice,
@@ -44,6 +45,7 @@ import { findBasicEnergyByType } from '../../lib/card-db'
 import { cardImageUrl, recordImageUrl } from '../../lib/sample-hand'
 import type { DeckCard } from '../../lib/types'
 import { WithAttached, type AttachedCard } from './Attached'
+import { CardBack, Playmat, PrizeGrid } from './Playmat'
 
 interface Props {
   cards: DeckCard[]
@@ -306,12 +308,26 @@ export function BoardEditor({ cards, goal, onChange, horizon = 'turn1' }: Props)
           </p>
         </header>
 
-        <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-          <div className="grid gap-3 sm:grid-cols-[auto_1fr]">
-            <div className="space-y-1">
-              <h3 className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
-                Active
-              </h3>
+        <Playmat
+          stadium={{
+            label: 'Stadium',
+            content: (
+              <Zone id="stadium" picked={picked} onPick={place}>
+                {goal.stadiumKey ? (
+                  <SlotCard
+                    card={byKey.get(goal.stadiumKey)}
+                    onRemove={() => onChange(setStadium(goal, null))}
+                    {...priorityProps('stadium')}
+                  />
+                ) : (
+                  <Empty label="Stadium" />
+                )}
+              </Zone>
+            ),
+          }}
+          active={{
+            label: 'Active Spot',
+            content: (
               <Zone id="active" picked={picked} onPick={place}>
                 {goal.active ? (
                   <SlotDrop
@@ -332,36 +348,39 @@ export function BoardEditor({ cards, goal, onChange, horizon = 'turn1' }: Props)
                   <Empty label="Active" />
                 )}
               </Zone>
-            </div>
-
-            <div className="space-y-1">
-              <div className="flex items-baseline justify-between gap-2">
-                <h3 className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
-                  Bench
-                </h3>
-                <label className="flex items-center gap-1 text-xs text-slate-500">
-                  at least
-                  <input
-                    type="number"
-                    min={0}
-                    max={8}
-                    value={goal.benchMin}
-                    onChange={(e) => onChange(setBenchMin(goal, Number(e.target.value) || 0))}
-                    aria-label="Minimum benched Pokémon"
-                    className="tnum w-14 rounded-md border border-slate-300 px-1.5 py-0.5 dark:border-slate-700 dark:bg-slate-950"
-                  />
-                  benched
-                </label>
-                {goal.benchMin > 0 && (
-                  <ConditionPriority
-                    label={`${goal.benchMin} or more benched`}
-                    priority={goal.priorities?.benchMin ?? 1}
-                    onPriority={(level) => onChange(setPartPriority(goal, 'benchMin', level))}
-                  />
-                )}
+            ),
+          }}
+          bench={{
+            label: (
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span>Bench</span>
+                <span className="flex items-center gap-2 font-normal tracking-normal normal-case">
+                  <label className="flex items-center gap-1 text-xs text-slate-500">
+                    at least
+                    <input
+                      type="number"
+                      min={0}
+                      max={8}
+                      value={goal.benchMin}
+                      onChange={(e) => onChange(setBenchMin(goal, Number(e.target.value) || 0))}
+                      aria-label="Minimum benched Pokémon"
+                      className="tnum w-14 rounded-md border border-slate-300 bg-white px-1.5 py-0.5 dark:border-slate-700 dark:bg-slate-950"
+                    />
+                    benched
+                  </label>
+                  {goal.benchMin > 0 && (
+                    <ConditionPriority
+                      label={`${goal.benchMin} or more benched`}
+                      priority={goal.priorities?.benchMin ?? 1}
+                      onPriority={(level) => onChange(setPartPriority(goal, 'benchMin', level))}
+                    />
+                  )}
+                </span>
               </div>
+            ),
+            content: (
               <Zone id="bench" picked={picked} onPick={place}>
-                <div className="flex flex-wrap items-end gap-2">
+                <div className="flex flex-wrap items-end justify-center gap-2">
                   {goal.bench.map((slot) => (
                     <SlotDrop
                       key={slot.id}
@@ -386,78 +405,88 @@ export function BoardEditor({ cards, goal, onChange, horizon = 'turn1' }: Props)
                   )}
                 </div>
               </Zone>
-              {/* A total across every Pokémon, whatever the Energy. */}
-              <div className="flex items-baseline justify-end gap-2 pt-1">
-                <label className="flex items-center gap-1 text-xs text-slate-500">
-                  at least
+            ),
+          }}
+          // The goal sets no Prizes or Deck; they are there so the field reads
+          // as a table, and they show where those piles sit in the replay.
+          prizes={{ label: 'Prizes', content: <PrizeGrid count={6} /> }}
+          deck={{ label: 'Deck', content: <CardBack className="w-12" /> }}
+          footer={
+            /* A total across every Pokémon, whatever the Energy. */
+            <div className="flex flex-wrap items-baseline justify-end gap-x-4 gap-y-2">
+              <span className="flex items-baseline gap-2">
+                <label className="flex items-center gap-1.5 text-xs text-slate-500">
                   <input
-                    type="number"
-                    min={0}
-                    max={20}
-                    value={goal.energyMin ?? 0}
-                    onChange={(e) => onChange(setEnergyMin(goal, Number(e.target.value) || 0))}
-                    aria-label="Minimum Energy attached in total"
-                    className="tnum w-14 rounded-md border border-slate-300 px-1.5 py-0.5 dark:border-slate-700 dark:bg-slate-950"
+                    type="checkbox"
+                    checked={goal.supporterFree === true}
+                    onChange={(e) => onChange(setSupporterFree(goal, e.target.checked))}
+                    className="accent-sky-600"
                   />
-                  Energy attached in total
+                  Supporter still free
                 </label>
-                {(goal.energyMin ?? 0) > 0 && (
+                {goal.supporterFree && (
                   <ConditionPriority
-                    label={`${goal.energyMin} or more Energy attached`}
-                    priority={goal.priorities?.energyMin ?? 1}
-                    onPriority={(level) => onChange(setPartPriority(goal, 'energyMin', level))}
+                    label="Supporter still free"
+                    priority={goal.priorities?.supporterFree ?? 1}
+                    onPriority={(level) => onChange(setPartPriority(goal, 'supporterFree', level))}
                   />
                 )}
-              </div>
+              </span>
+              <span className="flex items-baseline gap-2">
+              <label className="flex items-center gap-1 text-xs text-slate-500">
+                at least
+                <input
+                  type="number"
+                  min={0}
+                  max={20}
+                  value={goal.energyMin ?? 0}
+                  onChange={(e) => onChange(setEnergyMin(goal, Number(e.target.value) || 0))}
+                  aria-label="Minimum Energy attached in total"
+                  className="tnum w-14 rounded-md border border-slate-300 bg-white px-1.5 py-0.5 dark:border-slate-700 dark:bg-slate-950"
+                />
+                Energy attached in total
+              </label>
+              {(goal.energyMin ?? 0) > 0 && (
+                <ConditionPriority
+                  label={`${goal.energyMin} or more Energy attached`}
+                  priority={goal.priorities?.energyMin ?? 1}
+                  onPriority={(level) => onChange(setPartPriority(goal, 'energyMin', level))}
+                />
+              )}
+              </span>
             </div>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1">
-              <h3 className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
-                Stadium
-              </h3>
-              <Zone id="stadium" picked={picked} onPick={place}>
-                {goal.stadiumKey ? (
-                  <SlotCard
-                    card={byKey.get(goal.stadiumKey)}
-                    onRemove={() => onChange(setStadium(goal, null))}
-                    {...priorityProps('stadium')}
-                  />
-                ) : (
-                  <Empty label="Stadium" />
-                )}
-              </Zone>
-            </div>
-
-            <div className="space-y-1">
-              <div className="flex items-baseline justify-between gap-2">
-                <h3 className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
-                  Still in hand
-                </h3>
-                <label className="flex items-center gap-1 text-xs text-slate-500">
-                  at least
-                  <input
-                    type="number"
-                    min={0}
-                    max={20}
-                    value={goal.handMin ?? 0}
-                    onChange={(e) => onChange(setHandMin(goal, Number(e.target.value) || 0))}
-                    aria-label="Minimum cards in hand"
-                    className="tnum w-14 rounded-md border border-slate-300 px-1.5 py-0.5 dark:border-slate-700 dark:bg-slate-950"
-                  />
-                  cards
-                </label>
-                {(goal.handMin ?? 0) > 0 && (
-                  <ConditionPriority
-                    label={`${goal.handMin} or more cards in hand`}
-                    priority={goal.priorities?.handMin ?? 1}
-                    onPriority={(level) => onChange(setPartPriority(goal, 'handMin', level))}
-                  />
-                )}
+          }
+          hand={{
+            label: (
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span>Still in hand</span>
+                <span className="flex items-center gap-2 font-normal tracking-normal normal-case">
+                  <label className="flex items-center gap-1 text-xs text-slate-500">
+                    at least
+                    <input
+                      type="number"
+                      min={0}
+                      max={20}
+                      value={goal.handMin ?? 0}
+                      onChange={(e) => onChange(setHandMin(goal, Number(e.target.value) || 0))}
+                      aria-label="Minimum cards in hand"
+                      className="tnum w-14 rounded-md border border-slate-300 bg-white px-1.5 py-0.5 dark:border-slate-700 dark:bg-slate-950"
+                    />
+                    cards
+                  </label>
+                  {(goal.handMin ?? 0) > 0 && (
+                    <ConditionPriority
+                      label={`${goal.handMin} or more cards in hand`}
+                      priority={goal.priorities?.handMin ?? 1}
+                      onPriority={(level) => onChange(setPartPriority(goal, 'handMin', level))}
+                    />
+                  )}
+                </span>
               </div>
+            ),
+            content: (
               <Zone id="hand" picked={picked} onPick={place}>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap justify-center gap-2">
                   {goal.inHand.map((want) => (
                     <SlotCard
                       key={want.id}
@@ -470,13 +499,14 @@ export function BoardEditor({ cards, goal, onChange, horizon = 'turn1' }: Props)
                   {goal.inHand.length === 0 && <Empty label="Hand" />}
                 </div>
               </Zone>
-            </div>
-          </div>
-        </div>
+            ),
+          }}
+        />
 
         <Choices
           goal={goal}
           labelFor={labelFor}
+          onTogglePart={toggleInOption}
           grouping={grouping}
           onGrouping={(next) => {
             setSelected(null)
@@ -950,15 +980,21 @@ interface EitherOr {
  * is the cards tapped while it is open, and the choice is met when every card
  * of any one option is.
  */
+/** Parts with no card to tap: added to an either/or option from a button instead. */
+const CONDITION_KINDS = new Set(['benchMin', 'handMin', 'energyMin', 'supporterFree'])
+
 function Choices({
   goal,
   labelFor,
+  onTogglePart,
   grouping,
   onGrouping,
   onChange,
 }: {
   goal: FieldGoal
   labelFor: (cardKey: string) => string
+  /** Put a part in the option being built, or take it out again. */
+  onTogglePart: (partId: string) => void
   grouping: { options: string[][]; current: number } | null
   onGrouping: (next: { options: string[][]; current: number } | null) => void
   onChange: (goal: FieldGoal) => void
@@ -968,6 +1004,8 @@ function Choices({
   const label = (partId: string) => parts.find((part) => part.id === partId)?.label ?? partId
   const folded = scoreBoard(goal, empty, labelFor).parts.filter((part) => part.kind === 'choice')
   const optionText = (option: string[]) => option.map(label).join(' and ')
+  // Conditions not already folded into a saved choice.
+  const conditions = parts.filter((part) => CONDITION_KINDS.has(part.kind))
 
   if (parts.length < 2 && folded.length === 0) return null
 
@@ -1026,6 +1064,30 @@ function Choices({
             Tap the cards on the board for option {grouping.current + 1}. Each option is met when
             all of its cards are; the choice when any option is.
           </p>
+          {conditions.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Conditions">
+              <span className="text-slate-500">Conditions:</span>
+              {conditions.map((part) => {
+                const inThis = grouping.options[grouping.current]?.includes(part.id) ?? false
+                return (
+                  <button
+                    key={part.id}
+                    type="button"
+                    aria-pressed={inThis}
+                    onClick={() => onTogglePart(part.id)}
+                    className={[
+                      'rounded-md border px-2 py-0.5',
+                      inThis
+                        ? 'border-amber-500 bg-amber-100 font-medium text-amber-900 dark:bg-amber-900/40 dark:text-amber-100'
+                        : 'border-slate-300 bg-white hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800',
+                    ].join(' ')}
+                  >
+                    {part.label}
+                  </button>
+                )
+              })}
+            </div>
+          )}
           <ol className="space-y-1">
             {grouping.options.map((option, i) => (
               <li key={i} className={i === grouping.current ? 'font-medium' : 'text-slate-500'}>

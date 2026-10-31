@@ -22,6 +22,8 @@ export interface BoardView {
   stadiumKey: string | null
   /** Card keys still in hand. */
   hand: string[]
+  /** The turn's Supporter has been played (or, going first on turn 1, cannot be). */
+  supporterUsed?: boolean
 }
 
 /** A required Pokémon, and the Energy it should be carrying. */
@@ -67,6 +69,11 @@ export interface FieldGoal {
    * 0 (or absent) disables it.
    */
   energyMin?: number
+  /**
+   * The turn's Supporter still unplayed when the board comes together — free
+   * for a Boss's Orders or a draw. Absent or false disables it.
+   */
+  supporterFree?: boolean
   stadiumKey: string | null
   /** Other Stadiums that would do instead. */
   stadiumAlternatives?: string[]
@@ -132,6 +139,7 @@ export type PartKind =
   | 'benchMin'
   | 'handMin'
   | 'energyMin'
+  | 'supporterFree'
   | 'stadium'
   | 'hand'
   | 'choice'
@@ -279,6 +287,7 @@ export const goalIsEmpty = (goal: FieldGoal): boolean =>
   goal.benchMin === 0 &&
   (goal.handMin ?? 0) === 0 &&
   (goal.energyMin ?? 0) === 0 &&
+  !goal.supporterFree &&
   goal.stadiumKey === null &&
   goal.inHand.length === 0
 
@@ -528,6 +537,16 @@ export function scoreBoard(
       kind: 'energyMin',
       label: `${goal.energyMin} or more Energy attached`,
       met: attached >= goal.energyMin!,
+      priority: 1,
+    })
+  }
+
+  if (goal.supporterFree) {
+    parts.push({
+      id: 'supporterFree',
+      kind: 'supporterFree',
+      label: 'Supporter still free',
+      met: board.supporterUsed !== true,
       priority: 1,
     })
   }

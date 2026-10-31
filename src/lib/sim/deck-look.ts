@@ -34,12 +34,15 @@ export function takeFromTop(
 ): SimState {
   const next = cloneState(state)
   const top = next.deck.slice(0, count)
+  const chosen: DeckCard[] = []
   for (const pick of picks) {
     const at = top.findIndex((card) => card.key === pick.key)
     if (at < 0) continue
+    chosen.push(top[at])
     next.hand.push(top[at])
     top.splice(at, 1)
   }
+  next.look = { seen: state.deck.slice(0, count), chosen }
   next.deck = fairShuffle(state, [...top, ...next.deck.slice(count)], ctx.seed)
   next.shuffles = shufflesAfter(state)
   return next

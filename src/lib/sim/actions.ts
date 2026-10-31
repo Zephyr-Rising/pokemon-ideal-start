@@ -9,7 +9,9 @@ import {
   onEvolve,
   useAbility,
 } from './abilities'
-import { attack, attackAvailable, attackOf, costPaid } from './attacks'
+// The search-card table registers itself as it loads.
+import './searches'
+import { attack, attackAvailable, attackOf, costPaid, mayAttack } from './attacks'
 import {
   attachTriggers,
   lookupEffect,
@@ -30,6 +32,8 @@ import {
   freesRetreat,
   inPlay,
   isEvolutionCard,
+  isTeraPokemon,
+  teraSlotOnly,
   isBasicPokemon,
   isEnergy,
   isItem,
@@ -105,7 +109,13 @@ const FOREST = norm('Forest of Vitality')
 function benchWorthwhile(state: SimState, ctx: ActionContext): (card: DeckCard) => boolean {
   const forEngine = engineBenches(state)
   const room = benchRoom(state, ctx)
+  const teraOnly = teraSlotOnly(state, ctx.expandsBench)
+  // Only one Pokémon that draws from the Active Spot is worth benching for it:
+  // the Ability is once a turn across copies (Run Errand).
+  const drawerInPlay = allInPlay(state).some((slot) => drawsWhileActive(slot.card))
   return (card) => {
+    // The last of the five spots is kept for the Tera that opens up three more.
+    if (teraOnly && !isTeraPokemon(card)) return false
     // Any body will do for a bench count.
     if (ctx.wantsAnyBench) return true
     // A Pokémon of a line the goal still needs fills a slot it asked for.
@@ -132,7 +142,7 @@ function benchWorthwhile(state: SimState, ctx: ActionContext): (card: DeckCard) 
       (ctx.activeKey !== null && abilityOf(card)?.switchesActive === true) ||
       // Looking past this turn, a Pokémon that draws from the Active Spot,
       // benched ready to be promoted (Mega Kangaskhan ex).
-      (ctx.multiTurn === true && drawsWhileActive(card)) ||
+      (ctx.multiTurn === true && drawsWhileActive(card) && !drawerInPlay) ||
       // Latias ex, to make a retreat the Active cannot pay for free.
       (freesRetreat(card) && retreatStuck(state, ctx)) ||
       // When Energy counts on any Pokémon (a total-Energy condition), each
@@ -168,9 +178,9 @@ function benchRoom(state: SimState, ctx: ActionContext): { spare: number } {
 const isPokemonSpecific = (card: DeckCard): boolean => nameOf(card) === norm('Telepathic Psychic Energy')
 
 /** Is the Active's searching attack usable but for its Energy cost? */
-function attackNeedsEnergy(state: SimState): boolean {
+export function attackNeedsEnergy(state: SimState): boolean {
   const active = state.active
-  if (!active || state.attacked || state.cannotAttack) return false
+  if (!active || !mayAttack(state)) return false
   const found = attackOf(active.card)
   return found !== undefined && !costPaid(found.cost, active)
 }
@@ -179,7 +189,7 @@ function attackNeedsEnergy(state: SimState): boolean {
  * Does the Active still need Energy to retreat into the goal's Active? Only
  * then is Energy worth putting on a Pokémon the goal never mentioned.
  */
-function needsRetreatEnergy(state: SimState, ctx: ActionContext): boolean {
+export function needsRetreatEnergy(state: SimState, ctx: ActionContext): boolean {
   const active = state.active
   if (!active || state.usedRetreat) return false
   const into = state.bench.filter((slot) => worthSwitching(state, slot.card, ctx))

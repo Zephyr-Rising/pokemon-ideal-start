@@ -94,6 +94,14 @@ export const attachTool = (goal: FieldGoal, id: string, toolKey: string) =>
 export const removeTool = (goal: FieldGoal, id: string, toolKey: string) =>
   mapSlot(goal, id, (slot) => ({ ...slot, tools: slot.tools.filter((t) => t !== toolKey) }))
 
+/** "The turn's Supporter still free"; off removes it, and its priority, from the goal. */
+export const setSupporterFree = (goal: FieldGoal, on: boolean): FieldGoal => {
+  if (on) return { ...goal, supporterFree: true }
+  const { supporterFree: _off, ...rest } = goal
+  void _off
+  return rest
+}
+
 /** "At least this many cards in hand"; 0 turns it off. */
 export const setHandMin = (goal: FieldGoal, handMin: number): FieldGoal => ({
   ...goal,

@@ -55,10 +55,19 @@ export interface SimState {
   turn?: number
   /** Shuffles so far this game, which picks the next shuffle's order. */
   shuffles?: number
+  /** Coins flipped so far this game, which picks the next flip (see `flipCoin`). */
+  coins?: number
   /** This turn's attack has been made, which ends the turn. */
   attacked?: boolean
   /** No attack this turn: the player going first, on their first turn. */
   cannotAttack?: boolean
+  /**
+   * The play that made this board looked at the top of the deck (Pokégear 3.0,
+   * Recon Directive, Metal Maker): every card seen, and the ones it took. Kept
+   * for the replay to show; `cloneState` drops it, so it never outlives the
+   * play that set it.
+   */
+  look?: { seen: DeckCard[]; chosen: DeckCard[] }
 }
 
 /** Target index convention: -1 is the Active Spot, 0+ indexes the bench. */
@@ -111,6 +120,21 @@ export const allInPlay = (state: SimState): InPlay[] =>
  * Tera Pokémon too new to appear there is treated as non-Tera, which can
  * understate the cap rather than overstate it.
  */
+/**
+ * Is the next Bench spot kept for a Tera Pokémon? When the goal needs more
+ * than five benched, the only way past five is Area Zero Underdepths with a
+ * Tera Pokémon in play — and a Bench filled with five others leaves the Tera
+ * nowhere to go. So, until a Tera is in play, the fifth spot takes only one.
+ */
+export function teraSlotOnly(state: SimState, expandsBench: boolean | undefined): boolean {
+  if (!expandsBench) return false
+  if (allInPlay(state).some((slot) => slot.card.tags.includes('tera'))) return false
+  return state.bench.length === BASE_BENCH - 1
+}
+
+export const isTeraPokemon = (card: DeckCard): boolean =>
+  card.tags.includes('pokemon') && card.tags.includes('tera')
+
 export function benchCap(state: SimState): number {
   if (!state.stadium || nameOf(state.stadium) !== AREA_ZERO) {
     return BASE_BENCH
@@ -222,6 +246,7 @@ export const toBoardView = (state: SimState): BoardView => ({
   })),
   stadiumKey: state.stadium?.key ?? null,
   hand: state.hand.map((card) => card.key),
+  supporterUsed: state.usedSupporter,
 })
 
 /** Shallow clone — arrays are copied, card references shared. */
@@ -255,6 +280,7 @@ export function cloneState(state: SimState): SimState {
     usedAbilities: state.usedAbilities,
     turn: state.turn,
     shuffles: state.shuffles,
+    coins: state.coins,
     attacked: state.attacked,
     cannotAttack: state.cannotAttack,
   }
@@ -289,6 +315,7 @@ export function signature(state: SimState): string {
     state.usedAbilities.length > 1 ? [...state.usedAbilities].sort().join(',') : state.usedAbilities.join(''),
     state.turn ?? 1,
     state.shuffles ?? 0,
+    state.coins ?? 0,
     state.attacked ? 'x' : '',
   ].join('|')
 }
@@ -318,6 +345,17 @@ export function fairShuffle(state: SimState, pile: DeckCard[], seed: number): De
 }
 
 export const shufflesAfter = (state: SimState): number => (state.shuffles ?? 0) + 1
+
+/**
+ * Flip a coin, fairly: like a shuffle, the result depends only on the game and
+ * how many coins it has flipped, never on the line that led here, so the search
+ * cannot pick its way to heads. Returns heads, and counts the flip on `state`.
+ */
+export function flipCoin(state: SimState, seed: number): boolean {
+  const flips = state.coins ?? 0
+  state.coins = flips + 1
+  return mulberry32(seed ^ hashString(`coin:${flips}`))() < 0.5
+}
 
 /**
  * A small number per distinct card, for building signatures quickly.

@@ -2,7 +2,7 @@ import { acceptedKeys, type FieldGoal } from '../board/goal'
 import { norm } from '../normalize'
 import type { DeckCard } from '../types'
 import { abilityOf } from './abilities'
-import { nameOf } from './state'
+import { BASE_BENCH, nameOf } from './state'
 import type { ActionContext } from './actions'
 
 /**
@@ -63,6 +63,12 @@ export function buildContext(
   const prevOf = new Map<string, string>()
   for (const card of cards) {
     if (card.card?.prev) prevOf.set(nameOf(card), norm(card.card.prev))
+    // Stages the deck does not run still link the line: Rare Candy skips a
+    // Prinplup the deck has none of, on the way from Piplup to Empoleon ex.
+    const line = [nameOf(card), ...(card.lineage ?? []).map(norm)]
+    for (let i = 1; i < line.length - 1; i++) {
+      if (!prevOf.has(line[i])) prevOf.set(line[i], line[i + 1])
+    }
   }
   const byName = new Map<string, DeckCard[]>()
   for (const card of cards) {
@@ -170,9 +176,20 @@ export function buildContext(
     }
   }
 
+  // A goal wanting more than five benched needs Area Zero Underdepths and a
+  // Tera Pokémon in play, so searches go for both as if the goal named them.
+  const areaZero = cards.filter((card) => nameOf(card) === norm('Area Zero Underdepths'))
+  const tera = cards.filter((card) => card.tags.includes('pokemon') && card.tags.includes('tera'))
+  const expandsBench =
+    Math.max(goal.benchMin, goal.bench.length) > BASE_BENCH && areaZero.length > 0 && tera.length > 0
+  if (expandsBench) for (const card of [...areaZero, ...tera]) relevant.add(card.key)
+
   return {
     relevant,
     wantsAnyBench: goal.benchMin > 0,
+    expandsBench,
+    benchMin: goal.benchMin,
+    energyMin: goal.energyMin ?? 0,
     wantsEnergy: energySlots.length > 0 || anyEnergy,
     // Empty means "any type will do".
     energyTypes,

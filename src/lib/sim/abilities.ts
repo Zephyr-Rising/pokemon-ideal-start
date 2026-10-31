@@ -4,6 +4,7 @@ import { supporterChoices, takeFromTop } from './deck-look'
 import {
   attachFrom,
   choices,
+  handFromDeck,
   isPlayableSupporter,
   payDiscard,
   type EffectContext,
@@ -81,8 +82,26 @@ const ABILITIES = new Map<string, AbilityDef>()
 
 const register = (pokemon: string, def: AbilityDef) => ABILITIES.set(norm(pokemon), def)
 
-export const abilityOf = (card: DeckCard): AbilityDef | undefined =>
-  ABILITIES.get(nameOf(card))
+/** For the search-card table (`searches.ts`), which registers its own. */
+export const registerAbility = register
+
+/** Per card, since the search asks millions of times. */
+const abilityCache = new WeakMap<DeckCard, AbilityDef | null>()
+
+export function abilityOf(card: DeckCard): AbilityDef | undefined {
+  const cached = abilityCache.get(card)
+  if (cached !== undefined) return cached ?? undefined
+  let def = ABILITIES.get(nameOf(card))
+  // Keyed on the Pokémon's name, but a name has other printings without the
+  // Ability — Twilight Masquerade's Kadabra, three of the four Metang. When the
+  // card's moves are known, the Ability has to be printed on it.
+  const moves = card.card?.moves ?? []
+  if (def && moves.length > 0 && !moves.some((move) => move.name === `[Ability] ${def!.ability}`)) {
+    def = undefined
+  }
+  abilityCache.set(card, def ?? null)
+  return def
+}
 
 /** Names of every Pokémon whose Ability the simulator knows how to use. */
 export const implementedAbilities = (): string[] => [...ABILITIES.keys()].sort()
@@ -426,7 +445,92 @@ register('Tatsugiri', {
   },
 })
 
+// "Once during your turn, you may search your deck for up to 2 Evolution {M}
+// Pokémon, reveal them, and put them into your hand. Then, shuffle your deck."
+// Nothing on the card caps it across copies, so each Genesect ex has its own.
+register('Genesect ex', {
+  ability: 'Metallic Signal',
+  perCopy: true,
+  draws: true,
+  usable: (state) => state.deck.some(isMetalEvolution),
+  apply: (state, _target, ctx) => {
+    const boards = handFromDeck(state, ctx, 2, isMetalEvolution)
+    return boards.length > 0 ? boards : [state]
+  },
+})
+
+const isMetalEvolution = (card: DeckCard) =>
+  (card.tags.includes('stage1') || card.tags.includes('stage2')) &&
+  (card.card?.type ?? '').includes('{M}')
+
 // --- evolutions (turn 2 onward) -------------------------------------------
+
+// "Once during your turn, you may look at the top 4 cards of your deck and
+// attach any number of Basic {M} Energy cards you find there to your Pokémon in
+// any way you like. Shuffle the other cards and put them on the bottom of your
+// deck." Each Metang has its own.
+//
+// Every way to share out up to four Energy is too many boards, so it offers a
+// few a player would choose between: all of them on one Pokémon (each that the
+// Energy counts on), or one each, in turn, across those Pokémon. Pokémon the
+// Energy counts on are found as for every accelerator (`attachFrom`).
+register('Metang', {
+  ability: 'Metal Maker',
+  perCopy: true,
+  accelerates: true,
+  usable: (state) => state.deck.length > 0,
+  apply: (state, _target, ctx) => {
+    const top = state.deck.slice(0, 4)
+    const metal = top.filter((card) => isBasicEnergy(card) && energyType(card) === '{M}')
+    const rest = top.filter((card) => !metal.includes(card))
+    const targets = energyTargetsInPlay(state, ctx)
+    const deal = (pick: (i: number) => number): SimState => {
+      const next = cloneState(state)
+      next.deck = [...next.deck.slice(4), ...rest]
+      const slots = [...(next.active ? [next.active] : []), ...next.bench]
+      metal.forEach((energy, i) => {
+        const at = pick(i)
+        slots[at] = { ...slots[at], energy: [...slots[at].energy, energy] }
+      })
+      if (next.active) next.active = slots[0]
+      next.bench = slots.slice(next.active ? 1 : 0)
+      next.look = { seen: top, chosen: metal }
+      return next
+    }
+    // Nothing to attach, or nowhere it counts ("any number" may be none): all
+    // four go to the bottom, which still digs the deck.
+    if (metal.length === 0 || targets.length === 0) {
+      const next = cloneState(state)
+      next.deck = [...next.deck.slice(4), ...top]
+      next.look = { seen: top, chosen: [] }
+      return [next]
+    }
+    const boards = targets.map((at) => deal(() => at))
+    if (targets.length > 1 && metal.length > 1) boards.push(deal((i) => targets[i % targets.length]))
+    return boards
+  },
+})
+
+/**
+ * Where an accelerator's Energy counts, as positions in [Active, ...Bench]:
+ * the Pokémon the goal wants Energy on or an earlier stage of one, else any
+ * Pokémon the goal names. One position per identical Pokémon and Energy.
+ */
+function energyTargetsInPlay(state: SimState, ctx: EffectContext): number[] {
+  const wants = ctx.energyLineage ?? ctx.energyTargets
+  const counts = (slot: InPlay) =>
+    ctx.wantsEnergy ? wants.size === 0 || wants.has(slot.card.key) : ctx.relevant.has(slot.card.key)
+  const slots = inPlayCards(state)
+  const seen = new Set<string>()
+  const out: number[] = []
+  slots.forEach((slot, at) => {
+    const same = `${at === 0 && state.active ? 'A' : 'B'}${slot.card.key}+${slot.energy.length}`
+    if (!counts(slot) || seen.has(same)) return
+    seen.add(same)
+    out.push(at)
+  })
+  return out
+}
 
 // "Once during your turn, you may look at the top 2 cards of your deck and put
 // 1 of them into your hand. Put the other card on the bottom of your deck."
@@ -444,6 +548,7 @@ register('Drakloak', {
       const other = kept === a ? b : a
       next.hand.push(kept)
       if (other) next.deck.push(other)
+      next.look = { seen: state.deck.slice(0, 2), chosen: [kept] }
       return next
     })
   },

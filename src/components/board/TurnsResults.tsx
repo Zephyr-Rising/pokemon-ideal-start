@@ -46,15 +46,22 @@ export function TurnsResults({ goal, state, cards, onFewer }: Props) {
     )
   }
 
-  const { result, running, progress, total, startedAt, error } = state
+  const { result, running, progress, total, startedAt, error, stale, preview } = state
 
   return (
-    <section className="space-y-3">
+    // Figures for a board that has since changed stay readable, but dimmed.
+    <section className={`space-y-3 transition-opacity ${stale && !running ? 'opacity-55' : ''}`}>
       <h2 className="text-lg font-semibold">3 · How many turns it takes</h2>
 
       {error && (
         <p className="rounded-md bg-rose-50 px-3 py-2 text-xs text-rose-900 dark:bg-rose-950/40 dark:text-rose-200">
           The simulation failed: {error}
+        </p>
+      )}
+
+      {!result && !running && !error && (
+        <p className="rounded-lg bg-slate-100 px-3 py-6 text-center text-sm text-slate-600 dark:bg-slate-900 dark:text-slate-400">
+          Press Search to play this board out and see which turn your deck usually builds it by.
         </p>
       )}
 
@@ -65,6 +72,7 @@ export function TurnsResults({ goal, state, cards, onFewer }: Props) {
           startedAt={startedAt}
           updating={result !== null}
           onFewer={onFewer}
+          preview={preview}
         />
       )}
 
@@ -152,6 +160,8 @@ export function TurnsResults({ goal, state, cards, onFewer }: Props) {
             />
           </div>
 
+          {result.misses.games > 0 && <Shortfalls result={result} />}
+
           {result.parts.length > 1 && <PartTurns result={result} />}
 
           <TurnItComesTogether goal={goal} result={result} />
@@ -161,7 +171,7 @@ export function TurnsResults({ goal, state, cards, onFewer }: Props) {
           {result.examples.length > 0 && (
             <TurnExamples
               // Remount on a fresh run so the shown game resets to the fastest.
-              key={`${result.trials}-${result.examples.map((e) => `${e.turn}${e.goingFirst}`).join('')}`}
+              key={state.runId}
               examples={result.examples}
               cards={cards}
             />
@@ -192,8 +202,20 @@ export function TurnsResults({ goal, state, cards, onFewer }: Props) {
   )
 }
 
-function Distribution({ result }: { result: TurnsOrderResult & { goingFirst: TurnsOrderResult; goingSecond: TurnsOrderResult } }) {
-  const peak = Math.max(...result.byTurn, 1 - result.reached, 0.0001)
+function Distribution({
+  result,
+  prized = 0,
+}: {
+  result: TurnsOrderResult & { goingFirst: TurnsOrderResult; goingSecond: TurnsOrderResult }
+  /**
+   * Share of games the prizes made impossible. They are in "Later" too, so
+   * they are taken out of it and shown on their own. The same deals in either
+   * turn order, so one figure covers both.
+   */
+  prized?: number
+}) {
+  const later = (reached: number) => Math.max(0, 1 - reached - prized)
+  const peak = Math.max(...result.byTurn, later(result.reached), prized, 0.0001)
   const rows = result.byTurn.map((share, i) => ({
     label: `Turn ${i + 1}`,
     share,
@@ -244,15 +266,32 @@ function Distribution({ result }: { result: TurnsOrderResult & { goingFirst: Tur
           </th>
           <td className="px-2 py-1">
             <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800" role="presentation">
-              <div className="h-full rounded-full bg-slate-400" style={{ width: `${((1 - result.reached) / peak) * 100}%` }} />
+              <div className="h-full rounded-full bg-slate-400" style={{ width: `${(later(result.reached) / peak) * 100}%` }} />
             </div>
           </td>
-          <td className="py-1 text-right">{pct(1 - result.reached)}</td>
+          <td className="py-1 text-right">{pct(later(result.reached))}</td>
           <td className="py-1 pl-3 text-right" />
           <td className="hidden py-1 pl-3 text-right text-xs whitespace-nowrap sm:table-cell">
-            {pct(1 - result.goingFirst.reached)} · {pct(1 - result.goingSecond.reached)}
+            {pct(later(result.goingFirst.reached))} · {pct(later(result.goingSecond.reached))}
           </td>
         </tr>
+        {prized > 0 && (
+          <tr data-testid="turns-distribution-prized" className="border-t border-slate-100 text-slate-500 dark:border-slate-800">
+            <th scope="row" className="py-1 text-left font-normal whitespace-nowrap" title="A card the board needs was prized">
+              Prized out
+            </th>
+            <td className="px-2 py-1">
+              <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800" role="presentation">
+                <div className="h-full rounded-full bg-amber-500" style={{ width: `${(prized / peak) * 100}%` }} />
+              </div>
+            </td>
+            <td className="py-1 text-right">{pct(prized)}</td>
+            <td className="py-1 pl-3 text-right" />
+            <td className="hidden py-1 pl-3 text-right text-xs whitespace-nowrap sm:table-cell">
+              {pct(prized)} · {pct(prized)}
+            </td>
+          </tr>
+        )}
       </tbody>
     </table>
   )
@@ -263,6 +302,123 @@ function Distribution({ result }: { result: TurnsOrderResult & { goingFirst: Tur
  * and how often it has by the last turn played. Slowest first, since that is
  * the part holding the whole board back.
  */
+/**
+ * The games that had not built the board by the last turn, and what stopped
+ * them: how close they got, which parts were missing, and the commonest
+ * shortfalls — so a board that misses can be fixed where it actually fails.
+ */
+function Shortfalls({ result }: { result: TurnsResult }) {
+  const { misses } = result
+  const partsInBoard = misses.completion[0]?.of ?? result.misses.parts.length
+  const played = misses.prized < 1
+  const short = (level: { met: number; of: number }) =>
+    level.met === level.of ? 'Every part' : level.of - level.met === 1 ? 'All but 1 part' : `${level.met} of ${level.of} parts`
+  return (
+    <div
+      data-testid="turns-shortfalls"
+      className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"
+    >
+      <h3 className="text-sm font-semibold">When it isn't built by turn {MAX_TURNS}</h3>
+      <p className="mt-0.5 mb-3 text-xs text-slate-500">
+        In {pct(misses.share)} of games the board was not complete by turn {MAX_TURNS}. These are the
+        reasons: the prizes took a card it needs, or the game was played out and the best board it
+        reached fell short.
+      </p>
+
+      <div className="grid gap-5 sm:grid-cols-2">
+        {partsInBoard > 1 && (
+          <div>
+            <h4 className="mb-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase">
+              How close they got
+            </h4>
+            <ul className="space-y-1.5">
+              {misses.completion.map((level) => (
+                <Bar key={`${level.met}/${level.of}`} label={short(level)} share={level.share} />
+              ))}
+              {misses.prized > 0 && (
+                <Bar label="Impossible: a card it needs was prized" share={misses.prized} tone="amber" />
+              )}
+            </ul>
+          </div>
+        )}
+        {played && (
+        <div>
+          <h4 className="mb-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase">
+            What was missing
+          </h4>
+          <p className="-mt-1 mb-1.5 text-xs text-slate-500">In the games played out to the end.</p>
+          <ul className="space-y-1.5">
+            {misses.parts
+              .filter((part) => part.missing > 0)
+              .map((part) => (
+                <Bar key={part.id} label={part.label} share={part.missing} tone="rose" />
+              ))}
+          </ul>
+        </div>
+        )}
+      </div>
+
+      {misses.shortfalls.length > 0 && (
+        <div className="mt-4 border-t border-slate-100 pt-3 dark:border-slate-800">
+          <h4 className="mb-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase">
+            Commonest shortfalls
+          </h4>
+          <ol className="space-y-1 text-sm">
+            {misses.shortfalls.map((shortfall) => (
+              <li
+                key={`${shortfall.prized ? 'p' : 'm'}|${shortfall.missing.join('|')}`}
+                className="flex items-baseline justify-between gap-3"
+              >
+                {shortfall.prized ? (
+                  <span>
+                    Prized: <span className="font-medium">{shortfall.missing.join(' + ')}</span>
+                  </span>
+                ) : (
+                  <span>
+                    Missing{' '}
+                    <span className="font-medium">{shortfall.missing.join(' + ')}</span>
+                  </span>
+                )}
+                <span className="tnum shrink-0 text-xs text-slate-500">{pct(shortfall.share)}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** A labelled share, as a thin bar. */
+function Bar({
+  label,
+  share,
+  tone = 'sky',
+}: {
+  label: string
+  share: number
+  tone?: 'sky' | 'rose' | 'amber'
+}) {
+  return (
+    <li>
+      <div className="flex items-baseline justify-between gap-3 text-sm">
+        <span className="min-w-0 truncate" title={label}>
+          {label}
+        </span>
+        <span className="tnum shrink-0 text-xs text-slate-500">{pct(share)}</span>
+      </div>
+      <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+        <div
+          className={`h-full rounded-full ${
+            tone === 'rose' ? 'bg-rose-500' : tone === 'amber' ? 'bg-amber-500' : 'bg-sky-500'
+          }`}
+          style={{ width: `${Math.max(share * 100, share > 0 ? 1 : 0)}%` }}
+        />
+      </div>
+    </li>
+  )
+}
+
 function PartTurns({ result }: { result: TurnsResult }) {
   const order = (id: string, side: TurnsResult['goingFirst']) =>
     side.parts.find((part) => part.id === id)
@@ -535,7 +691,8 @@ function TurnItComesTogether({ goal, result }: { goal: FieldGoal; result: TurnsR
         How often {levels.length > 1 ? what : 'the board'} first {levels.length > 1 && what.endsWith('parts') ? 'come' : 'comes'}{' '}
         together on each turn, and how often by then.
       </p>
-      <Distribution result={view} />
+      {/* Prizes rule out the whole board; a priority level may still be possible. */}
+      <Distribution result={view} prized={view === result ? result.prizeLocked.rate : 0} />
     </div>
   )
 }

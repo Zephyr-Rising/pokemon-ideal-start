@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { cardImageUrl } from '../../lib/sample-hand'
 import { WithAttached, type AttachedCard } from './Attached'
+import { OpenSpot, Pile, PileCount, Playmat, PrizeGrid } from './Playmat'
+import type { StepSummary } from '../../lib/sim/describe'
 import type { ExampleCard, ExampleFrame, ExampleSlot } from '../../lib/sim/playtest'
 import type { DeckCard } from '../../lib/types'
 
@@ -58,6 +60,66 @@ function CardFace({
   )
 }
 
+/**
+ * The last play as pictures: the card played (or the Pokémon whose Ability
+ * or attack it was), an arrow, and what came of it. A look at the top of the
+ * deck also shows every card seen, the ones taken lit and the rest dimmed.
+ */
+function StepPicture({
+  summary,
+  imageFor,
+}: {
+  summary: StepSummary
+  imageFor: (cardKey: string) => string | null
+}) {
+  const { actor, result, looked } = summary
+  if (!actor) return null
+  return (
+    <figure
+      aria-label="What this play did"
+      className="animate-step w-full max-w-[13rem] space-y-1.5 rounded-lg bg-white/85 p-2 shadow-sm ring-1 ring-slate-200 dark:bg-slate-900/85 dark:ring-slate-700"
+    >
+      <div className="flex items-center gap-1.5">
+        <div className="w-9 shrink-0">
+          <CardFace card={actor} src={imageFor(actor.cardKey)} />
+        </div>
+        {result.length > 0 && (
+          <>
+            <span aria-hidden className="text-sm text-slate-400">
+              →
+            </span>
+            <div className="flex min-w-0 flex-wrap gap-1">
+              {keyed(result, (card) => card.cardKey).map(({ item, key }) => (
+                <div key={key} className="w-7">
+                  <CardFace card={item} src={imageFor(item.cardKey)} />
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+      {looked && looked.length > 0 && (
+        <figcaption>
+          <p className="text-[0.6rem] font-semibold tracking-wide text-slate-500 uppercase">
+            Looked at {looked.length} · took {looked.filter((entry) => entry.chosen).length}
+          </p>
+          <div className="mt-0.5 flex flex-wrap gap-1">
+            {keyed(looked, (entry) => entry.card.cardKey).map(({ item, key }) => (
+              <div
+                key={key}
+                title={`${item.card.label}${item.chosen ? ' (taken)' : ''}`}
+                className={`w-6 rounded-[4%] ${item.chosen ? 'ring-2 ring-sky-500' : 'opacity-40'}`}
+              >
+                <CardFace card={item.card} src={imageFor(item.card.cardKey)} />
+              </div>
+            ))}
+          </div>
+        </figcaption>
+      )}
+    </figure>
+  )
+}
+
 export function ReplayPlayer({ frames, cards }: Props) {
   const [at, setAt] = useState(0)
   const [playing, setPlaying] = useState(false)
@@ -98,6 +160,8 @@ export function ReplayPlayer({ frames, cards }: Props) {
   const atEnd = position >= last
   const hand = keyed<ExampleCard>(frame.hand, (card) => card.cardKey)
   const bench = keyed<ExampleSlot>(frame.board.bench, (slot) => slot.cardKey)
+  const discard = frame.board.discard
+  const topDiscard = discard[discard.length - 1]
 
   return (
     <div data-testid="replay" className="mt-4 border-t border-slate-100 pt-3 dark:border-slate-800">
@@ -163,61 +227,107 @@ export function ReplayPlayer({ frames, cards }: Props) {
         {frame.step}
       </p>
 
-      <div className="mt-3 space-y-3 rounded-lg bg-slate-50 p-3 dark:bg-slate-950/60">
-        <div>
-          <p className="mb-1 text-[0.65rem] tracking-wide text-slate-500 uppercase">
-            Active{frame.board.stadium ? ` · ${frame.board.stadium}` : ''}
-          </p>
-          {frame.board.active ? (
-            <div className="w-20">
-              <WithAttached attached={attachedTo(frame.board.active)} peek={12}>
+      <div className="mt-3">
+        <Playmat
+          corner={
+            <div data-testid="replay-turn" className="leading-none">
+              <div className="text-[0.6rem] font-semibold tracking-wide text-slate-500 uppercase">Turn</div>
+              <div className="tnum font-display text-3xl font-bold text-slate-800 dark:text-slate-100">
+                {frame.turn ?? 1}
+              </div>
+            </div>
+          }
+          aside={
+            frame.summary && (
+              <StepPicture key={position} summary={frame.summary} imageFor={imageFor} />
+            )
+          }
+          stadium={{
+            label: 'Stadium',
+            content: frame.board.stadiumKey ? (
+              <div className="w-12 sm:w-14">
                 <CardFace
-                  key={frame.board.active.cardKey}
-                  card={frame.board.active}
-                  src={imageFor(frame.board.active.cardKey)}
+                  key={frame.board.stadiumKey}
+                  card={{ label: frame.board.stadium ?? '' }}
+                  src={imageFor(frame.board.stadiumKey)}
                 />
-              </WithAttached>
-            </div>
-          ) : (
-            <p className="text-xs text-slate-400">nothing yet</p>
-          )}
-        </div>
-
-        <div>
-          <p className="mb-1 text-[0.65rem] tracking-wide text-slate-500 uppercase">
-            Bench ({bench.length})
-          </p>
-          {bench.length > 0 ? (
-            <div className="flex flex-wrap items-end gap-1.5">
-              {bench.map(({ item, key }) => (
-                <div key={key} className="w-14">
-                  <WithAttached attached={attachedTo(item)} peek={9}>
-                    <CardFace card={item} src={imageFor(item.cardKey)} />
-                  </WithAttached>
+              </div>
+            ) : (
+              <OpenSpot className="w-12 sm:w-14" />
+            ),
+          }}
+          active={{
+            label: 'Active Spot',
+            content: frame.board.active ? (
+              <div className="w-24 text-left">
+                <WithAttached attached={attachedTo(frame.board.active)} peek={12}>
+                  <CardFace
+                    key={frame.board.active.cardKey}
+                    card={frame.board.active}
+                    src={imageFor(frame.board.active.cardKey)}
+                  />
+                </WithAttached>
+              </div>
+            ) : (
+              <OpenSpot className="w-24" />
+            ),
+          }}
+          bench={{
+            label: `Bench (${bench.length})`,
+            content: (
+              <div className="flex flex-wrap items-end justify-center gap-1.5">
+                {bench.map(({ item, key }) => (
+                  <div key={key} className="w-12 sm:w-14">
+                    <WithAttached attached={attachedTo(item)} peek={9}>
+                      <CardFace card={item} src={imageFor(item.cardKey)} />
+                    </WithAttached>
+                  </div>
+                ))}
+                {/* The spots still open, up to the usual five. */}
+                {Array.from({ length: Math.max(0, 5 - bench.length) }).map((_, i) => (
+                  <OpenSpot key={`open-${i}`} className="w-12 sm:w-14" />
+                ))}
+              </div>
+            ),
+          }}
+          prizes={{ label: 'Prizes', content: <PrizeGrid count={frame.board.prizeCount} /> }}
+          deck={{
+            label: 'Deck · Discard',
+            content: (
+              <div className="flex items-end justify-end gap-2">
+                <Pile count={frame.board.deckCount} label="Cards in deck" />
+                <div className="relative w-12" title={`${discard.length} in the discard pile`}>
+                  {topDiscard ? (
+                    // Keyed by pile size, so each new discard deals in on top.
+                    <CardFace
+                      key={`${topDiscard.cardKey}#${discard.length}`}
+                      card={topDiscard}
+                      src={imageFor(topDiscard.cardKey)}
+                    />
+                  ) : (
+                    <OpenSpot />
+                  )}
+                  <PileCount count={discard.length} />
                 </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-xs text-slate-400">empty</p>
-          )}
-        </div>
-
-        <div>
-          <p className="mb-1 text-[0.65rem] tracking-wide text-slate-500 uppercase">
-            Hand ({hand.length})
-          </p>
-          {hand.length > 0 ? (
-            <div className="flex flex-wrap gap-1.5">
-              {hand.map(({ item, key }) => (
-                <div key={key} className="w-12">
-                  <CardFace card={item} src={imageFor(item.cardKey)} />
+              </div>
+            ),
+          }}
+          hand={{
+            label: `Hand (${hand.length})`,
+            content:
+              hand.length > 0 ? (
+                <div className="flex flex-wrap justify-center gap-1.5">
+                  {hand.map(({ item, key }) => (
+                    <div key={key} className="w-12">
+                      <CardFace card={item} src={imageFor(item.cardKey)} />
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-xs text-slate-400">empty</p>
-          )}
-        </div>
+              ) : (
+                <p className="text-center text-xs text-slate-400">empty</p>
+              ),
+          }}
+        />
       </div>
     </div>
   )

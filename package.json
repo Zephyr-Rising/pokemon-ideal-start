@@ -21,7 +21,8 @@
     "e2e": "playwright test",
     "preflight": "node scripts/preflight.mjs",
     "deploy": "node scripts/deploy-pages.mjs",
-    "bench": "rolldown scripts/bench.ts --format esm --platform node --file .bench/bench.mjs --log-level warn && node .bench/bench.mjs"
+    "bench": "rolldown scripts/bench.ts --format esm --platform node --file .bench/bench.mjs --log-level warn && node .bench/bench.mjs",
+    "diagnose": "rolldown scripts/diagnose-misses.ts --format esm --platform node --file .bench/diagnose.mjs --log-level warn && node .bench/diagnose.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

@@ -40,6 +40,16 @@ const list = (names: string[]): string => {
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
 }
 
+/** Every Energy attached anywhere in play. */
+const allEnergy = (state: SimState): DeckCard[] =>
+  (state.active ? [state.active, ...state.bench] : state.bench).flatMap((slot) => slot.energy)
+
+/** "2 Energy to Mega Excadrill ex", or just the name for one. */
+function attachedPhrase(before: SimState, after: SimState, targets: string[]): string {
+  const count = gained(allEnergy(before), allEnergy(after)).length
+  return count > 1 ? `attaching ${count} to ${list(targets)}` : `attaching to ${list(targets)}`
+}
+
 /** Energy totals per Pokémon, keyed by card. */
 function energyByCard(state: SimState): Map<string, number> {
   const totals = new Map<string, number>()
@@ -154,7 +164,7 @@ export function describeStep(before: SimState, after: SimState, action: Action):
       const outcome: string[] = []
       if (drawn.length > 0) outcome.push(`taking ${list(drawn)}`)
       const energyTargets = energised(before, after)
-      if (energyTargets.length > 0) outcome.push(`attaching to ${list(energyTargets)}`)
+      if (energyTargets.length > 0) outcome.push(attachedPhrase(before, after, energyTargets))
       if (before.active?.card.key !== after.active?.card.key) {
         outcome.push(`switching ${label(after.active!.card)} in`)
       }
@@ -232,6 +242,7 @@ export function describeStep(before: SimState, after: SimState, action: Action):
     case 'attack': {
       const name = attackOf(before.active!.card)?.name ?? 'an attack'
       const used = `Attack with ${label(before.active!.card)}'s ${name}`
+      if (benched.length > 0) return `${used} — benching ${list(benched)}`
       return drawn.length > 0 ? `${used} — taking ${list(drawn)}` : used
     }
 
@@ -243,3 +254,81 @@ export function describeStep(before: SimState, after: SimState, action: Action):
 /** The Energy a Pokémon ended the turn carrying, for the board summary. */
 export const energySummary = (energy: DeckCard[]): string =>
   energy.map((card) => energyType(card) || '●').join(' ')
+
+/** A card in a step's summary. */
+export interface StepCard {
+  cardKey: string
+  label: string
+}
+
+/**
+ * One step as pictures, for the replay: the card that was played (or the
+ * Pokémon whose Ability or attack it was), what came of it, and — for a look
+ * at the top of the deck — every card seen, with the ones taken flagged.
+ *
+ * Built by diffing the boards either side, like `describeStep`, so a card
+ * added later summarises itself.
+ */
+export interface StepSummary {
+  actor: StepCard | null
+  /** Cards taken or drawn, Pokémon benched or evolved into, Energy attached. */
+  result: StepCard[]
+  looked?: { card: StepCard; chosen: boolean }[]
+}
+
+const stepCard = (card: DeckCard): StepCard => ({ cardKey: card.key, label: label(card) })
+
+const inPlayCards = (state: SimState): DeckCard[] =>
+  (state.active ? [state.active, ...state.bench] : state.bench).flatMap((slot) => [
+    slot.card,
+    ...slot.energy,
+    ...slot.tools,
+  ])
+
+/** Cards in `after` that were not in `before`, as cards. */
+function gainedCards(before: DeckCard[], after: DeckCard[]): DeckCard[] {
+  const had = countBy(before)
+  const out: DeckCard[] = []
+  for (const card of after) {
+    const remaining = had.get(card.key) ?? 0
+    if (remaining > 0) had.set(card.key, remaining - 1)
+    else out.push(card)
+  }
+  return out
+}
+
+export function summarizeStep(before: SimState, after: SimState, action: Action): StepSummary {
+  const fromHand = 'handIndex' in action ? before.hand[action.handIndex] : undefined
+  const actor =
+    fromHand ??
+    (action.kind === 'useAbility'
+      ? (action.target === ACTIVE_TARGET ? before.active : before.bench[action.target])?.card
+      : action.kind === 'attack'
+        ? before.active?.card
+        : action.kind === 'retreat' || action.kind === 'placeActive'
+          ? after.active?.card
+          : undefined)
+
+  // New in hand, and new in play: benched, evolved into, Energy and Tools.
+  const result = [
+    ...gainedCards(before.hand, after.hand),
+    ...gainedCards(inPlayCards(before), inPlayCards(after)),
+  ]
+  // The played card itself shows up in play (a Pokémon benched, an Energy
+  // attached); it is already the actor.
+  if (actor) {
+    const at = result.findIndex((card) => card.key === actor.key)
+    if (at >= 0) result.splice(at, 1)
+  }
+
+  const summary: StepSummary = { actor: actor ? stepCard(actor) : null, result: result.map(stepCard) }
+  if (after.look) {
+    const chosen = countBy(after.look.chosen)
+    summary.looked = after.look.seen.map((card) => {
+      const left = chosen.get(card.key) ?? 0
+      if (left > 0) chosen.set(card.key, left - 1)
+      return { card: stepCard(card), chosen: left > 0 }
+    })
+  }
+  return summary
+}

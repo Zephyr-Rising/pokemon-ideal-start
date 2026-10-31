@@ -1,14 +1,251 @@
 @import 'tailwindcss';
 
 /* Tailwind v4 is CSS-first: no tailwind.config.js. `dark:` follows the
-   viewer's prefers-color-scheme, so there is no theme toggle to keep in sync. */
+   viewer's prefers-color-scheme — or a design that is always dark, which sets
+   data-scheme="dark" on <html> (see src/lib/design.ts). */
+@custom-variant dark {
+  @media (prefers-color-scheme: dark) {
+    @slot;
+  }
+  &:where([data-scheme='dark'], [data-scheme='dark'] *) {
+    @slot;
+  }
+}
+
+/* --- Designs ---------------------------------------------------------------
+   Three looks for the same page, picked in the header (`data-design` on
+   <html>). Every component is written against Tailwind's slate (neutrals) and
+   sky (accent) scales, and in v4 those are CSS variables — so a design is
+   mostly a palette, a pair of fonts and a set of corner radii, redefined
+   here. The few things a palette cannot change (the header band, the tabs,
+   panel shadows) have their own rules further down. */
+
+@theme {
+  --font-display: var(--font-sans);
+}
+
+/* Tournament: a broadcast look. Deep navy, electric blue, condensed caps. */
+:root,
+[data-design='tournament'] {
+  --font-sans: 'Barlow', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Barlow Condensed', 'Barlow', ui-sans-serif, sans-serif;
+  --radius-sm: 0.125rem;
+  --radius-md: 0.2rem;
+  --radius-lg: 0.25rem;
+  --radius-xl: 0.35rem;
+  --color-white: #ffffff;
+  --color-slate-50: #f3f5fa;
+  --color-slate-100: #e7ebf4;
+  --color-slate-200: #d2d9e7;
+  --color-slate-300: #adb8cf;
+  --color-slate-400: #7c8aaa;
+  --color-slate-500: #55648a;
+  --color-slate-600: #3c4a6d;
+  --color-slate-700: #2b3757;
+  --color-slate-800: #1b2540;
+  --color-slate-900: #111a2f;
+  --color-slate-950: #0a101f;
+  --color-sky-50: #eef3ff;
+  --color-sky-100: #dbe5ff;
+  --color-sky-200: #bccdff;
+  --color-sky-300: #8eabff;
+  --color-sky-400: #5b82ff;
+  --color-sky-500: #3461ff;
+  --color-sky-600: #1f47f0;
+  --color-sky-700: #1736c4;
+  --color-sky-800: #172f9b;
+  --color-sky-900: #182c77;
+  --color-sky-950: #111b47;
+  --brand-stripe: #ffcb05;
+}
+
+/* Field Guide: an editorial look. Warm paper, ink, a deep green, serif heads. */
+[data-design='field-guide'] {
+  --font-sans: 'Source Sans 3', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Fraunces', ui-serif, Georgia, serif;
+  --radius-sm: 0.15rem;
+  --radius-md: 0.3rem;
+  --radius-lg: 0.4rem;
+  --radius-xl: 0.5rem;
+  --color-white: #fffdf8;
+  --color-slate-50: #faf7f0;
+  --color-slate-100: #f3eee2;
+  --color-slate-200: #e6dece;
+  --color-slate-300: #d0c4ad;
+  --color-slate-400: #a8997e;
+  --color-slate-500: #7d6f56;
+  --color-slate-600: #625641;
+  --color-slate-700: #4b4131;
+  --color-slate-800: #342c22;
+  --color-slate-900: #211c15;
+  --color-slate-950: #15110c;
+  --color-sky-50: #edf7f3;
+  --color-sky-100: #d3ece2;
+  --color-sky-200: #a8d8c6;
+  --color-sky-300: #74bca3;
+  --color-sky-400: #469c80;
+  --color-sky-500: #2b7f64;
+  --color-sky-600: #1f6650;
+  --color-sky-700: #1a5242;
+  --color-sky-800: #164236;
+  --color-sky-900: #12362d;
+  --color-sky-950: #0a201a;
+  --brand-stripe: #c0582b;
+}
+
+/* Pokédex: a playful look. Bright, rounded, red, with chunky shadows. */
+[data-design='pokedex'] {
+  --font-sans: 'Rubik', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Rubik', ui-sans-serif, system-ui, sans-serif;
+  --radius-sm: 0.35rem;
+  --radius-md: 0.6rem;
+  --radius-lg: 0.85rem;
+  --radius-xl: 1.25rem;
+  --color-white: #ffffff;
+  --color-slate-50: #f5f6f9;
+  --color-slate-100: #eceef3;
+  --color-slate-200: #dadee7;
+  --color-slate-300: #bcc3d1;
+  --color-slate-400: #8e97a9;
+  --color-slate-500: #667085;
+  --color-slate-600: #4c5568;
+  --color-slate-700: #394050;
+  --color-slate-800: #252a35;
+  --color-slate-900: #171b23;
+  --color-slate-950: #0d1016;
+  --color-sky-50: #fff1f1;
+  --color-sky-100: #ffdfdf;
+  --color-sky-200: #ffc4c4;
+  --color-sky-300: #ff9a9a;
+  --color-sky-400: #ff5f5f;
+  --color-sky-500: #f43434;
+  --color-sky-600: #d91f1f;
+  --color-sky-700: #b51616;
+  --color-sky-800: #941717;
+  --color-sky-900: #7a1919;
+  --color-sky-950: #420808;
+  --brand-stripe: #ffcb05;
+}
+
+/* Data Lab: a terminal look. Mono type, phosphor green, square corners. */
+[data-design='data-lab'] {
+  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'IBM Plex Mono', ui-monospace, monospace;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-xl: 0;
+  --color-white: #ffffff;
+  --color-slate-50: #f4f5f4;
+  --color-slate-100: #e8eae8;
+  --color-slate-200: #d3d7d3;
+  --color-slate-300: #b0b6b0;
+  --color-slate-400: #838b84;
+  --color-slate-500: #5f6760;
+  --color-slate-600: #474e48;
+  --color-slate-700: #353a36;
+  --color-slate-800: #232724;
+  --color-slate-900: #161917;
+  --color-slate-950: #0b0d0c;
+  --color-sky-50: #ecfdf1;
+  --color-sky-100: #d0f8dc;
+  --color-sky-200: #a2efbc;
+  --color-sky-300: #66de93;
+  --color-sky-400: #2fc56b;
+  --color-sky-500: #16a34f;
+  --color-sky-600: #0f8540;
+  --color-sky-700: #0f6a36;
+  --color-sky-800: #10542e;
+  --color-sky-900: #0e4527;
+  --color-sky-950: #032714;
+  --brand-stripe: #f2b705;
+}
+
+/* Holo Foil: a holographic card. Iridescent wash, frosted glass, violet. */
+[data-design='holo'] {
+  --font-sans: 'Outfit', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Outfit', ui-sans-serif, system-ui, sans-serif;
+  --radius-sm: 0.4rem;
+  --radius-md: 0.7rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+  --color-white: #ffffff;
+  --color-slate-50: #f7f5fc;
+  --color-slate-100: #efebf8;
+  --color-slate-200: #ded7ef;
+  --color-slate-300: #c3b9df;
+  --color-slate-400: #988cbb;
+  --color-slate-500: #706595;
+  --color-slate-600: #554b78;
+  --color-slate-700: #41395e;
+  --color-slate-800: #2a2442;
+  --color-slate-900: #1b162e;
+  --color-slate-950: #0f0c1d;
+  --color-sky-50: #f4f0ff;
+  --color-sky-100: #ebe3ff;
+  --color-sky-200: #d8caff;
+  --color-sky-300: #bba2ff;
+  --color-sky-400: #9b72ff;
+  --color-sky-500: #8247fb;
+  --color-sky-600: #7030ec;
+  --color-sky-700: #5f23cb;
+  --color-sky-800: #4f1fa6;
+  --color-sky-900: #421d86;
+  --color-sky-950: #280f5b;
+  --brand-stripe: #3ee0d0;
+  --holo: linear-gradient(110deg, #ff7eb3, #ffd66e 25%, #7ef0c8 50%, #7ec8ff 75%, #c58cff);
+}
+
+/* Midnight: always dark. Near-black, neon cyan and magenta, soft glows. */
+[data-design='midnight'] {
+  --font-sans: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.45rem;
+  --radius-lg: 0.6rem;
+  --radius-xl: 0.8rem;
+  --color-white: #ffffff;
+  --color-slate-50: #f7f8fc;
+  --color-slate-100: #eceef6;
+  --color-slate-200: #d6daea;
+  --color-slate-300: #b4bbd4;
+  --color-slate-400: #8a93b3;
+  --color-slate-500: #5f6785;
+  --color-slate-600: #3a4058;
+  --color-slate-700: #262a3b;
+  --color-slate-800: #181b28;
+  --color-slate-900: #0f111a;
+  --color-slate-950: #07080d;
+  --color-sky-50: #e6fdff;
+  --color-sky-100: #c2f8ff;
+  --color-sky-200: #8ef0ff;
+  --color-sky-300: #4fe3fb;
+  --color-sky-400: #1ccff0;
+  --color-sky-500: #06b2d4;
+  --color-sky-600: #0790b0;
+  --color-sky-700: #0d738e;
+  --color-sky-800: #145d73;
+  --color-sky-900: #154d60;
+  --color-sky-950: #073242;
+  --brand-stripe: #ff3ea5;
+  --glow: 0 0 18px rgb(28 207 240 / 0.35);
+}
 
 @layer base {
   html {
     color-scheme: light dark;
   }
+  html[data-scheme='dark'] {
+    color-scheme: dark;
+  }
   body {
     @apply bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
   }
   /* Tabular figures stop percentages jittering as they update. */
   .tnum {
@@ -53,4 +290,451 @@
       animation: none;
     }
   }
+
+  /* The play mat: a soft field behind one player's side of the table, tinted
+     by the design's accent. */
+  .playmat {
+    --mat-top: color-mix(in oklab, var(--color-sky-100) 40%, var(--color-white));
+    --mat-bottom: color-mix(in oklab, var(--color-sky-200) 30%, var(--color-slate-50));
+    background: linear-gradient(180deg, var(--mat-top), var(--mat-bottom));
+  }
+  [data-scheme='dark'] .playmat {
+    --mat-top: color-mix(in oklab, var(--color-sky-900) 25%, var(--color-slate-900));
+    --mat-bottom: color-mix(in oklab, var(--color-sky-950) 25%, var(--color-slate-950));
+  }
+  /* A face-down card, in the Pokémon TCG back's colours: a deep blue swirl
+     inside a light border, a Poké Ball at the centre. The same in every
+     design, as a real card back is. */
+  .card-back {
+    position: relative;
+    overflow: hidden;
+    background:
+      radial-gradient(ellipse 60% 45% at 30% 30%, rgb(120 170 255 / 0.55), transparent 70%),
+      radial-gradient(ellipse 70% 55% at 75% 75%, rgb(40 90 200 / 0.6), transparent 70%),
+      conic-gradient(from 210deg at 50% 50%, #0e2a6b, #2456b8, #0f2f78, #3a6fd0, #0e2a6b);
+    border: 2px solid #dfe8f7;
+    box-shadow: 0 1px 2px rgb(15 23 42 / 0.35);
+  }
+  .card-back::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 46%;
+    aspect-ratio: 1;
+    transform: translate(-50%, -50%) rotate(-18deg);
+    border-radius: 9999px;
+    background:
+      radial-gradient(circle, #fff 0 13%, #1b1b1f 13% 21%, transparent 21%),
+      linear-gradient(#e3262f 0 45%, #1b1b1f 45% 55%, #f3f4f6 55%);
+    box-shadow:
+      0 0 0 1.5px #1b1b1f,
+      0 1px 3px rgb(0 0 0 / 0.4);
+  }
+  @media (prefers-color-scheme: dark) {
+    .playmat {
+      --mat-top: color-mix(in oklab, var(--color-sky-900) 25%, var(--color-slate-900));
+      --mat-bottom: color-mix(in oklab, var(--color-sky-950) 25%, var(--color-slate-950));
+    }
+  }
+}
+
+/* --- The shell: header, tabs and panels, per design ------------------------
+   Outside any layer on purpose: these must beat the components' own utility
+   classes (a selected tab's text colour, say), which sit in a layer. */
+
+
+.app-header {
+  position: relative;
+}
+.brand-mark {
+  color: var(--color-sky-600);
+}
+.design-switch button[aria-pressed='true'] {
+  background: var(--color-sky-600);
+  color: var(--color-white);
+}
+
+/* Tournament: a full-width navy band with a gold stripe, caps everywhere. */
+[data-design='tournament'] .app-header {
+  background: linear-gradient(120deg, var(--color-slate-900), var(--color-sky-900));
+  color: var(--color-white);
+  border-bottom: 4px solid var(--brand-stripe);
+}
+[data-design='tournament'] .app-header .tagline {
+  color: var(--color-slate-300);
+}
+[data-design='tournament'] .brand-mark {
+  color: var(--brand-stripe);
+}
+[data-design='tournament'] h1,
+[data-design='tournament'] h2,
+[data-design='tournament'] h3,
+[data-design='tournament'] [role='tab'] {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+[data-design='tournament'] .design-switch {
+  border-color: rgb(255 255 255 / 0.25);
+}
+[data-design='tournament'] .design-switch button {
+  color: var(--color-slate-200);
+}
+[data-design='tournament'] .design-switch button[aria-pressed='true'] {
+  background: var(--brand-stripe);
+  color: var(--color-slate-950);
+}
+[data-design='tournament'] .app-tabs {
+  gap: 0;
+  border-bottom: 0;
+}
+[data-design='tournament'] [role='tab'] {
+  border: 0;
+  margin: 0;
+  padding: 0.6rem 1.1rem;
+  background: var(--color-slate-200);
+  color: var(--color-slate-700);
+  font-family: var(--font-display);
+  font-size: 1rem;
+  clip-path: polygon(0.6rem 0, 100% 0, calc(100% - 0.6rem) 100%, 0 100%);
+}
+[data-design='tournament'] [role='tab'][aria-selected='true'] {
+  background: var(--color-sky-600);
+  color: var(--color-white);
+}
+
+/* Field Guide: ink on paper, hairline rules, italic serif tabs, no shadow. */
+[data-design='field-guide'] .app-header {
+  border-bottom: 1px solid var(--color-slate-300);
+}
+[data-design='field-guide'] .app-header h1 {
+  font-weight: 600;
+  font-style: italic;
+  letter-spacing: -0.01em;
+}
+[data-design='field-guide'] .brand-mark {
+  color: var(--brand-stripe);
+}
+[data-design='field-guide'] [role='tab'] {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 1.05rem;
+}
+[data-design='field-guide'] .app-main h2 {
+  font-weight: 600;
+}
+[data-design='field-guide'] .shadow-sm {
+  box-shadow: none;
+}
+
+/* Pokédex: a red lid across the top, pill tabs, chunky offset shadows. */
+[data-design='pokedex'] .app-header {
+  background: var(--color-sky-600);
+  color: var(--color-white);
+  border-bottom: 6px solid var(--color-slate-900);
+}
+[data-design='pokedex'] .app-header::after {
+  /* The Pokédex's lens. */
+  content: '';
+  position: absolute;
+  right: 1.25rem;
+  bottom: -1.1rem;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 9999px;
+  background: var(--color-white);
+  border: 5px solid var(--color-slate-900);
+}
+[data-design='pokedex'] .app-header .tagline {
+  color: var(--color-sky-100);
+}
+[data-design='pokedex'] .brand-mark {
+  color: var(--color-white);
+}
+[data-design='pokedex'] .design-switch {
+  border-color: rgb(255 255 255 / 0.4);
+}
+[data-design='pokedex'] .design-switch button {
+  color: var(--color-sky-50);
+}
+[data-design='pokedex'] .design-switch button[aria-pressed='true'] {
+  background: var(--color-white);
+  color: var(--color-sky-700);
+}
+[data-design='pokedex'] h1,
+[data-design='pokedex'] h2 {
+  font-weight: 700;
+}
+[data-design='pokedex'] .app-tabs {
+  border-bottom: 0;
+  gap: 0.5rem;
+}
+[data-design='pokedex'] [role='tab'] {
+  margin: 0;
+  border: 2px solid var(--color-slate-900);
+  border-radius: 9999px;
+  padding: 0.45rem 1.1rem;
+  background: var(--color-white);
+  color: var(--color-slate-800);
+  box-shadow: 3px 3px 0 var(--color-slate-900);
+}
+[data-design='pokedex'] [role='tab'][aria-selected='true'] {
+  background: var(--brand-stripe);
+  color: var(--color-slate-950);
+}
+[data-design='pokedex'] .app-main .rounded-xl.border {
+  border-width: 2px;
+  border-color: var(--color-slate-900);
+  box-shadow: 4px 4px 0 var(--color-slate-900);
+}
+@media (prefers-color-scheme: dark) {
+  [data-design='pokedex'] [role='tab'] {
+    background: var(--color-slate-800);
+    color: var(--color-slate-100);
+  }
+  [data-design='pokedex'] [role='tab'],
+  [data-design='pokedex'] .app-main .rounded-xl.border {
+    border-color: var(--color-slate-600);
+    box-shadow: 4px 4px 0 var(--color-slate-700);
+  }
+}
+
+/* Data Lab: graph paper, a terminal header, bracketed mono tabs. */
+[data-design='data-lab'] body {
+  background-image:
+    linear-gradient(var(--color-slate-200) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-slate-200) 1px, transparent 1px);
+  background-size: 24px 24px;
+  background-color: var(--color-slate-50);
+}
+[data-design='data-lab'] .app-header {
+  background: var(--color-slate-950);
+  color: var(--color-sky-300);
+  border-bottom: 1px solid var(--color-sky-600);
+}
+[data-design='data-lab'] .app-header h1 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+[data-design='data-lab'] .app-header h1::before {
+  content: '> ';
+  color: var(--brand-stripe);
+}
+[data-design='data-lab'] .app-header .tagline {
+  color: var(--color-slate-400);
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+}
+[data-design='data-lab'] .brand-mark {
+  color: var(--color-sky-400);
+}
+[data-design='data-lab'] .design-switch {
+  border-color: var(--color-slate-700);
+}
+[data-design='data-lab'] .design-switch button {
+  color: var(--color-slate-300);
+  font-family: var(--font-display);
+}
+[data-design='data-lab'] .design-switch button[aria-pressed='true'] {
+  background: var(--color-sky-500);
+  color: var(--color-slate-950);
+}
+[data-design='data-lab'] .app-main h2,
+[data-design='data-lab'] .app-main h3 {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+[data-design='data-lab'] .tnum {
+  font-family: var(--font-display);
+}
+[data-design='data-lab'] .app-tabs {
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--color-slate-300);
+}
+[data-design='data-lab'] [role='tab'] {
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  border: 0;
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  color: var(--color-slate-500);
+}
+[data-design='data-lab'] [role='tab']::before {
+  content: '[ ';
+}
+[data-design='data-lab'] [role='tab']::after {
+  content: ' ]';
+}
+[data-design='data-lab'] [role='tab'][aria-selected='true'] {
+  background: var(--color-slate-900);
+  color: var(--color-sky-300);
+}
+[data-design='data-lab'] .app-main .rounded-xl.border {
+  border-color: var(--color-slate-400);
+}
+[data-design='data-lab'] .shadow-sm {
+  box-shadow: none;
+}
+@media (prefers-color-scheme: dark) {
+  [data-design='data-lab'] body {
+    background-image:
+      linear-gradient(var(--color-slate-900) 1px, transparent 1px),
+      linear-gradient(90deg, var(--color-slate-900) 1px, transparent 1px);
+    background-color: var(--color-slate-950);
+  }
+  [data-design='data-lab'] .app-header {
+    background: #000;
+  }
+  [data-design='data-lab'] .app-tabs {
+    border-color: var(--color-slate-700);
+  }
+  [data-design='data-lab'] [role='tab'][aria-selected='true'] {
+    background: var(--color-sky-950);
+  }
+  [data-design='data-lab'] .app-main .rounded-xl.border {
+    border-color: var(--color-slate-700);
+  }
+}
+
+/* Holo Foil: an iridescent wash behind frosted-glass panels. */
+[data-design='holo'] body {
+  background:
+    radial-gradient(60rem 40rem at 0% 0%, rgb(255 126 179 / 0.22), transparent 60%),
+    radial-gradient(50rem 40rem at 100% 10%, rgb(126 200 255 / 0.28), transparent 60%),
+    radial-gradient(60rem 50rem at 50% 100%, rgb(126 240 200 / 0.22), transparent 60%),
+    var(--color-slate-50);
+  background-attachment: fixed;
+}
+[data-design='holo'] .app-header h1 {
+  background: var(--holo);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  font-weight: 800;
+  filter: saturate(1.3) brightness(0.8);
+}
+[data-design='holo'] .brand-mark {
+  color: var(--color-sky-500);
+}
+[data-design='holo'] .design-switch,
+[data-design='holo'] .app-tabs {
+  background: rgb(255 255 255 / 0.55);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgb(255 255 255 / 0.8);
+  border-radius: 9999px;
+  box-shadow: 0 4px 20px rgb(112 48 236 / 0.12);
+}
+[data-design='holo'] .design-switch button,
+[data-design='holo'] [role='tab'] {
+  border-radius: 9999px;
+}
+[data-design='holo'] .app-tabs {
+  display: inline-flex;
+  padding: 0.3rem;
+  gap: 0.25rem;
+}
+[data-design='holo'] [role='tab'] {
+  border: 0;
+  margin: 0;
+  padding: 0.45rem 1.1rem;
+  color: var(--color-slate-600);
+}
+[data-design='holo'] [role='tab'][aria-selected='true'],
+[data-design='holo'] .design-switch button[aria-pressed='true'] {
+  background: linear-gradient(110deg, var(--color-sky-600), #c03bd8);
+  color: var(--color-white);
+  box-shadow: 0 2px 12px rgb(112 48 236 / 0.35);
+}
+[data-design='holo'] .app-main .rounded-xl.border {
+  background: rgb(255 255 255 / 0.62);
+  backdrop-filter: blur(16px);
+  border-color: rgb(255 255 255 / 0.85);
+  box-shadow: 0 8px 32px rgb(80 40 160 / 0.1);
+}
+[data-design='holo'] .playmat {
+  position: relative;
+  border-color: rgb(255 255 255 / 0.85);
+}
+@media (prefers-color-scheme: dark) {
+  [data-design='holo'] body {
+    background:
+      radial-gradient(60rem 40rem at 0% 0%, rgb(255 126 179 / 0.12), transparent 60%),
+      radial-gradient(50rem 40rem at 100% 10%, rgb(126 200 255 / 0.14), transparent 60%),
+      radial-gradient(60rem 50rem at 50% 100%, rgb(126 240 200 / 0.1), transparent 60%),
+      var(--color-slate-950);
+    background-attachment: fixed;
+  }
+  [data-design='holo'] .app-header h1 {
+    filter: saturate(1.2);
+  }
+  [data-design='holo'] .design-switch,
+  [data-design='holo'] .app-tabs {
+    background: rgb(27 22 46 / 0.6);
+    border-color: rgb(255 255 255 / 0.12);
+  }
+  [data-design='holo'] [role='tab'] {
+    color: var(--color-slate-300);
+  }
+  [data-design='holo'] .app-main .rounded-xl.border {
+    background: rgb(27 22 46 / 0.55);
+    border-color: rgb(255 255 255 / 0.1);
+  }
+}
+
+/* Midnight: neon edges and glows on near-black. Always dark (data-scheme). */
+[data-design='midnight'] body {
+  background:
+    radial-gradient(50rem 30rem at 85% -10%, rgb(255 62 165 / 0.12), transparent 60%),
+    radial-gradient(50rem 30rem at 10% -10%, rgb(28 207 240 / 0.12), transparent 60%),
+    var(--color-slate-950);
+  background-attachment: fixed;
+}
+[data-design='midnight'] .app-header {
+  border-bottom: 1px solid transparent;
+  border-image: linear-gradient(90deg, transparent, var(--color-sky-400), var(--brand-stripe), transparent) 1;
+}
+[data-design='midnight'] .app-header h1 {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  text-shadow: 0 0 22px rgb(28 207 240 / 0.45);
+}
+[data-design='midnight'] .app-header .tagline {
+  color: var(--color-slate-400);
+}
+[data-design='midnight'] .brand-mark {
+  color: var(--brand-stripe);
+  filter: drop-shadow(0 0 8px rgb(255 62 165 / 0.6));
+}
+[data-design='midnight'] .design-switch {
+  border-color: var(--color-slate-700);
+}
+[data-design='midnight'] .design-switch button[aria-pressed='true'] {
+  background: var(--color-sky-400);
+  color: var(--color-slate-950);
+  box-shadow: var(--glow);
+}
+[data-design='midnight'] .app-tabs {
+  border-color: var(--color-slate-700);
+  gap: 0.75rem;
+}
+[data-design='midnight'] [role='tab'] {
+  color: var(--color-slate-400);
+  border-bottom-width: 2px;
+}
+[data-design='midnight'] [role='tab'][aria-selected='true'] {
+  color: var(--color-sky-200);
+  border-color: var(--color-sky-400);
+  text-shadow: 0 0 12px rgb(28 207 240 / 0.6);
+  box-shadow: 0 8px 12px -10px rgb(28 207 240 / 0.9);
+}
+[data-design='midnight'] .app-main .rounded-xl.border {
+  background: rgb(15 17 26 / 0.8);
+  border-color: rgb(28 207 240 / 0.18);
+  box-shadow:
+    0 0 0 1px rgb(28 207 240 / 0.04),
+    0 10px 40px -12px rgb(28 207 240 / 0.18);
+}
+[data-design='midnight'] .card-back {
+  box-shadow: 0 0 10px rgb(28 207 240 / 0.35);
 }

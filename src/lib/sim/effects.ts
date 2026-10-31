@@ -4,6 +4,7 @@ import { abilityOf, drawsWhileActive, engineKeeps, engineWants, onEvolve } from 
 import { attackOf } from './attacks'
 import { distinctCards, supporterChoices, takeFromTop, topOf } from './deck-look'
 import {
+  allInPlay,
   benchCap,
   cardName,
   nameOf,
@@ -16,6 +17,8 @@ import {
   inPlay,
   isBasicPokemon,
   isEnergy,
+  isTeraPokemon,
+  teraSlotOnly,
   retreatCost,
   shufflesAfter,
   type InPlay,
@@ -70,6 +73,15 @@ export interface EffectContext {
    * how many of that line the goal wants in play. Bench space is kept for them.
    */
   goalLines?: { keys: Set<string>; needed: number }[]
+  /**
+   * The goal wants more benched than the usual five, and the deck can make
+   * room: Area Zero Underdepths and a Tera Pokémon. Until a Tera is in play,
+   * the last of the five spots is kept for one (see `teraSlotOnly`).
+   */
+  expandsBench?: boolean
+  /** The goal's counts, for crediting progress toward them across turns. */
+  benchMin?: number
+  energyMin?: number
   /** Cards the goal wants kept in hand and nowhere on the board: never bench these. */
   handOnly?: Set<string>
   /** Basics in this deck that evolve into a Pokémon with a draw Ability. */
@@ -295,34 +307,165 @@ function fetchToHand(state: SimState, card: DeckCard): SimState {
 
 // --- search to bench -------------------------------------------------------
 
-registerEffect('Buddy-Buddy Poffin', (state, ctx) => {
-  // "Search your deck for up to 2 Basic Pokémon with 70 HP or less and put them
-  // onto your Bench."
-  // Never a Pokémon the goal wants kept in hand.
+/**
+ * "Search your deck for up to `max` (1 or 2) Basic Pokémon ... and put them
+ * onto your Bench": every first pick, and every second pick after it. Never a
+ * Pokémon the goal wants kept in hand. Shared by the Items and the attacks
+ * (Call for Family) that read this way.
+ */
+export function benchFromDeck(
+  state: SimState,
+  ctx: EffectContext,
+  max: 1 | 2,
+  allowed: (card: DeckCard) => boolean,
+  // A few put an evolved Pokémon straight onto the Bench (Maushold's Familial
+  // March); for those the card names exactly which.
+  basicOnly = true,
+): SimState[] {
   const eligible = (card: DeckCard) =>
-    isBasicPokemon(card) && hp(card) <= 70 && !ctx.handOnly?.has(card.key)
+    (!basicOnly || isBasicPokemon(card)) && allowed(card) && !ctx.handOnly?.has(card.key)
   const out: SimState[] = []
   const first = choices(state, state.deck, eligible, ctx)
 
+  // The reserved Tera spot (see `teraSlotOnly`) holds for searches too.
+  const fits = (board: SimState, card: DeckCard) =>
+    !teraSlotOnly(board, ctx.expandsBench) || isTeraPokemon(card)
   for (const a of first) {
     const afterFirst = cloneState(state)
     if (afterFirst.bench.length >= benchCap(afterFirst)) break
+    if (!fits(afterFirst, a)) continue
     removeFirst(afterFirst.deck, a)
     afterFirst.bench.push(inPlay(a))
     out.push(afterFirst)
+    if (max === 1) continue
 
     for (const b of choices(afterFirst, afterFirst.deck, eligible, ctx)) {
       if (afterFirst.bench.length >= benchCap(afterFirst)) break
+      if (!fits(afterFirst, b)) continue
       const afterSecond = cloneState(afterFirst)
       removeFirst(afterSecond.deck, b)
       afterSecond.bench.push(inPlay(b))
       out.push(afterSecond)
     }
   }
-  // "Up to 2" includes benching nothing, which is all that is left if the deck
+  // "Up to" includes benching nothing, which is all that is left if the deck
   // holds nothing the goal wants.
   return out.length > 0 ? out : [state]
+}
+
+/**
+ * "Search your deck for up to `max` (1 or 2) ... and put them into your
+ * hand", from the cards worth having (see `choices`). Two picks may be two
+ * copies of one card when the deck holds them. Taking the full number is never
+ * worse than taking fewer, so a single pick is offered only when nothing else
+ * is. Searching for nothing is not a play: no candidates, no boards.
+ */
+export function handFromDeck(
+  state: SimState,
+  ctx: EffectContext,
+  max: 1 | 2,
+  allowed: (card: DeckCard) => boolean,
+): SimState[] {
+  const found = choices(state, state.deck, allowed, ctx)
+  const take = (picks: DeckCard[]) => {
+    const next = cloneState(state)
+    for (const pick of picks) {
+      removeFirst(next.deck, pick)
+      next.hand.push(pick)
+    }
+    next.deck = fairShuffle(next, next.deck, ctx.seed)
+    next.shuffles = shufflesAfter(next)
+    return next
+  }
+  if (max === 1 || found.length === 0) return found.map((card) => take([card]))
+  const copies = (card: DeckCard) => state.deck.filter((c) => c.key === card.key).length
+  const out: SimState[] = []
+  found.forEach((a, i) => {
+    for (const b of found.slice(i)) {
+      if (b.key === a.key && copies(a) < 2) continue
+      out.push(take([a, b]))
+    }
+  })
+  // One candidate with one copy: that card alone.
+  return out.length > 0 ? out : found.map((card) => take([card]))
+}
+
+registerEffect('Buddy-Buddy Poffin', (state, ctx) =>
+  // "Search your deck for up to 2 Basic Pokémon with 70 HP or less and put them
+  // onto your Bench."
+  benchFromDeck(state, ctx, 2, (card) => hp(card) <= 70),
+)
+
+// "Search your deck for up to 2 Basic Pokémon or 1 Evolution Pokémon, reveal
+// them, and put them into your hand."
+registerEffect("Brock's Scouting", (state, ctx) => {
+  const boards = [
+    ...handFromDeck(state, ctx, 2, isBasicPokemon),
+    ...handFromDeck(state, ctx, 1, isEvolution),
+  ]
+  return boards.length > 0 ? boards : [state]
 })
+
+registerEffect('Precious Trolley', (state, ctx) => {
+  // "Search your deck for any number of Basic Pokémon and put them onto your
+  // Bench. Then, shuffle your deck."
+  //
+  const boards = benchPrefixes(state, ctx, Infinity, isBasicPokemon)
+  return boards.length > 0 ? boards : [state]
+})
+
+/**
+ * "Search your deck for up to `max` (or any number of) ... and put them onto
+ * your Bench", for three or more.
+ *
+ * Every subset would swamp the search, so the Pokémon go down one at a time in
+ * the order a player wants them — what the goal still needs first, then
+ * anything not yet in play, then further copies — and each stopping point is
+ * a board: bench space is a resource, so how many to take is left to the
+ * search. None to take, no boards.
+ */
+export function benchPrefixes(
+  state: SimState,
+  ctx: EffectContext,
+  max: number,
+  allowed: (card: DeckCard) => boolean,
+): SimState[] {
+  const eligible = (card: DeckCard) => allowed(card) && !ctx.handOnly?.has(card.key)
+  const out: SimState[] = []
+  let current = state
+  while (current.bench.length < benchCap(current) && out.length < max) {
+    // The reserved Tera spot (see `teraSlotOnly`) holds here too.
+    const reserved = teraSlotOnly(current, ctx.expandsBench)
+    const found = choices(current, current.deck, eligible, ctx).filter(
+      (card) => !reserved || isTeraPokemon(card),
+    )
+    const active = current.active
+    // As the goal scores it: the Bench, and the Active only when it is the
+    // goal's own — a Genesect ex Active does not fill a Bench spot for one.
+    const counted = [
+      ...(active && ctx.activeLineage?.has(active.card.key) ? [active] : []),
+      ...current.bench,
+    ]
+    const short = (card: DeckCard) =>
+      (ctx.goalLines ?? []).some(
+        (line) =>
+          line.keys.has(card.key) &&
+          counted.filter((slot) => line.keys.has(slot.card.key)).length < line.needed,
+      )
+    const inPlayKeys = new Set(allInPlay(current).map((slot) => slot.card.key))
+    const pick =
+      found.find(short) ?? found.find((card) => !inPlayKeys.has(card.key)) ?? found[0]
+    if (!pick) break
+    const next = cloneState(current)
+    removeFirst(next.deck, pick)
+    next.bench.push(inPlay(pick))
+    next.deck = fairShuffle(state, next.deck, ctx.seed)
+    next.shuffles = shufflesAfter(state)
+    out.push(next)
+    current = next
+  }
+  return out
+}
 
 // --- search to hand --------------------------------------------------------
 
@@ -453,6 +596,22 @@ registerEffect("Team Rocket's Petrel", (state, ctx) => {
   })
 })
 
+// "Search your deck for a Supporter card that has "Team Rocket" in its name,
+// reveal it, and put it into your hand. Then, shuffle your deck." An Item, so
+// it finds the turn's Supporter (Petrel) without spending it.
+registerEffect("Team Rocket's Transceiver", (state, ctx) => {
+  const rocket = (card: DeckCard) =>
+    card.tags.includes('supporter') &&
+    nameOf(card).includes(norm('Team Rocket')) &&
+    (ctx.relevant.has(card.key) || isImplemented(card))
+  return distinctCards(state.deck.filter(rocket)).map((card) => {
+    const next = fetchToHand(state, card)
+    next.deck = fairShuffle(next, next.deck, ctx.seed)
+    next.shuffles = shufflesAfter(next)
+    return next
+  })
+})
+
 // "Search your deck for 2 cards, shuffle your deck, then put those cards on top
 // of it in any order."
 //
@@ -482,6 +641,20 @@ registerEffect("Ciphermaniac's Codebreaking", (state, ctx) => {
     .sort((a, b) => b.rank - a.rank || a.order - b.order)
     .slice(0, CODEBREAKING_CANDIDATES)
     .map((entry) => entry.card)
+  return stackOnTop(state, ctx, candidates, 2)
+})
+
+/**
+ * Put up to `count` (1 or 2) of the candidates on top of a shuffled deck, best
+ * first, every pair tried: Ciphermaniac's Codebreaking, Dialga's Time
+ * Manipulation, Crobat's Nighttime Maneuvers. None, no boards.
+ */
+export function stackOnTop(
+  state: SimState,
+  ctx: EffectContext,
+  candidates: DeckCard[],
+  count: 1 | 2,
+): SimState[] {
   if (candidates.length === 0) return []
 
   const stack = (top: DeckCard[]): SimState => {
@@ -491,6 +664,7 @@ registerEffect("Ciphermaniac's Codebreaking", (state, ctx) => {
     next.shuffles = shufflesAfter(state)
     return next
   }
+  if (count === 1) return candidates.map((card) => stack([card]))
   const out: SimState[] = []
   candidates.forEach((first, i) => {
     // The better card goes on top, so a draw of one takes it.
@@ -502,7 +676,23 @@ registerEffect("Ciphermaniac's Codebreaking", (state, ctx) => {
   })
   // A deck of one card worth having still gets it on top.
   return out.length > 0 ? out : [stack([candidates[0]])]
-})
+}
+
+/**
+ * The cards worth putting on top, best first: what the goal names, then
+ * engine pieces, then the outs that turn a hand around.
+ */
+export function topCandidates(state: SimState, ctx: EffectContext, limit: number): DeckCard[] {
+  const finishesEngine = engineWants(state)
+  const rank = (card: DeckCard) =>
+    ctx.relevant.has(card.key) ? 3 : finishesEngine(card) ? 2 : isOut(card, state, ctx) ? 1 : 0
+  return distinctCards(state.deck)
+    .map((card, order) => ({ card, order, rank: rank(card) }))
+    .filter((entry) => entry.rank > 0)
+    .sort((a, b) => b.rank - a.rank || a.order - b.order)
+    .slice(0, limit)
+    .map((entry) => entry.card)
+}
 
 /** How many of the best candidates Ciphermaniac's Codebreaking tries in pairs. */
 const CODEBREAKING_CANDIDATES = 4
@@ -965,6 +1155,20 @@ export function worthSwitching(state: SimState, incoming: DeckCard, ctx: EffectC
     !ctx.activeLineage?.has(state.active.card.key) &&
     state.active.card.key !== ctx.activeKey &&
     (ctx.multiTurn === true || !state.usedAbilities.includes(nameOf(incoming)))
+  ) {
+    return true
+  }
+  // Playing on, even out of the goal's own Active while it is unfinished (a
+  // finished board ends the search first), when the retreat is free (Latias
+  // ex): it draws now, and stepping back is free next turn.
+  if (
+    ctx.multiTurn === true &&
+    drawsWhileActive(incoming) &&
+    // Not into another copy of itself: the Ability is spent across copies.
+    !drawsWhileActive(state.active.card) &&
+    ctx.activeLineage?.get(state.active.card.key) === 0 &&
+    retreatCost(state, state.active) === 0 &&
+    !state.usedAbilities.includes(nameOf(incoming))
   ) {
     return true
   }

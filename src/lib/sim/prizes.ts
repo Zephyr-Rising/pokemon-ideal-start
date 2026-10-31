@@ -99,9 +99,19 @@ export function boardRequirements(
     // Its earlier stages, by name: any printing evolves the same way.
     const top = byKey.get(slot.cardKey)
     const stage2 = top?.tags.includes('stage2') ?? false
-    let prev = top?.card?.prev ? norm(top.card.prev) : null
-    for (let depth = 0; prev && depth < 2; depth++) {
-      const name = prev
+    // From the card database when known, so a stage the deck does not run
+    // (and the Basic under it) still counts.
+    const earlierStages: string[] = []
+    if (top?.lineage) earlierStages.push(...top.lineage.map(norm))
+    else {
+      let prev = top?.card?.prev ? norm(top.card.prev) : null
+      for (let depth = 0; prev && depth < 2; depth++) {
+        earlierStages.push(prev)
+        const earlier = cards.find((card) => nameOf(card) === prev)
+        prev = earlier?.card?.prev ? norm(earlier.card.prev) : null
+      }
+    }
+    earlierStages.forEach((name, depth) => {
       const label = cards.find((card) => nameOf(card) === name)?.label ?? name
       need(`name:${name}`, () => ({
         label,
@@ -109,9 +119,7 @@ export function boardRequirements(
         // Rare Candy skips the Stage 1 (the first step back from a Stage 2).
         candySkippable: stage2 && depth === 0,
       }))
-      const earlier = cards.find((card) => nameOf(card) === name)
-      prev = earlier?.card?.prev ? norm(earlier.card.prev) : null
-    }
+    })
   }
   // Energy counts one by one, each at its own priority.
   const energyCounts = (slot: (typeof slots)[number], index: number) =>

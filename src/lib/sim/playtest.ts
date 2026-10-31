@@ -1,6 +1,8 @@
 import { goalIsEmpty, scoreBoard, type FieldGoal, type GoalScore, type Priority } from '../board/goal'
 import type { DeckCard } from '../types'
 import { draw, type ActionContext } from './actions'
+import type { StepSummary } from './describe'
+import { PARTIAL_FROM, type OnProgress } from './preview'
 import { buildContext } from './context'
 import { isImplemented } from './effects'
 import { mulberry32, shuffled } from './rng'
@@ -14,8 +16,14 @@ export interface PlaytestOptions {
   /** Search budget per opening placement. */
   maxNodes?: number
   /** Called every `progressEvery` trials so a long run can report in. */
-  onProgress?: (done: number, total: number) => void
+  onProgress?: OnProgress
   progressEvery?: number
+  /** Play only these deals (by trial number): one shared game, replayed. */
+  onlyTrials?: Set<number>
+  /** From `PARTIAL_FROM` of the way through, the result so far. */
+  onPartial?: (result: PlaytestResult) => void
+  /** When a partial result is due; every few games from `PARTIAL_FROM` on unless a measurement asks otherwise. */
+  partialAt?: (played: number, total: number) => boolean
 }
 
 export interface PartStat {
@@ -96,12 +104,18 @@ export interface PlaytestExample {
   reached: boolean
   /** Played going first, so without a Supporter. */
   goingFirst: boolean
+  /** Which deal of the run it is, so it can be shared and played again. */
+  trial: number
 }
 
 /** One moment in the line: what was just done, and the resulting table. */
 export interface ExampleFrame {
   /** The play that produced this board; the first frame is the deal itself. */
   step: string
+  /** The same play as pictures; absent for the deal, the placement and draws. */
+  summary?: StepSummary
+  /** The player's turn this frame belongs to; absent means turn 1. */
+  turn?: number
   board: ExampleBoard
   /** The cards held at this point, in hand order. */
   hand: ExampleCard[]
@@ -117,7 +131,14 @@ export interface ExampleBoard {
   active: ExampleSlot | null
   bench: ExampleSlot[]
   stadium: string | null
+  /** The Stadium's card, to show it; null with none in play. */
+  stadiumKey: string | null
   handCount: number
+  /** Cards left in the deck, and Prizes still face down. */
+  deckCount: number
+  prizeCount: number
+  /** The discard pile, top card last. */
+  discard: ExampleCard[]
 }
 
 export interface ExampleSlot {
@@ -224,11 +245,33 @@ export function playtest(
   // A deal that worked going first, kept in case no game needed going second
   // to succeed: it is replayed going second at the end so both orders can be
   // shown.
-  let replayAsSecond: { deal: Deal; ctx: ActionContext } | null = null
+  let replayAsSecond: { deal: Deal; ctx: ActionContext; trial: number } | null = null
   let closest: PlaytestExample | null = null
   let closestScore = -1
 
+  /** The result over the first `played` deals: the final one, or a partial one on the way. */
+  const summarize = (played: number): PlaytestResult => ({
+    ...averageOrders(first, second, played),
+    trials: played,
+    goingFirst: first.result(played),
+    goingSecond: second.result(played),
+    prizeLocked: locked.stat(played),
+    mulliganRate: deals === 0 ? 0 : mulligans / deals,
+    ignored,
+    truncated,
+    // Nothing succeeded anywhere? Then the closest attempt is the only thing
+    // worth showing.
+    examples:
+      firstRoutes.size + secondRoutes.size > 0
+        ? interleave([...firstRoutes.values()], [...secondRoutes.values()]).slice(0, MAX_EXAMPLES)
+        : closest
+          ? [closest]
+          : [],
+  })
+
   for (let trial = 0; trial < trials; trial++) {
+    // Each deal depends only on its trial number, so skipping some is safe.
+    if (options.onlyTrials && !options.onlyTrials.has(trial)) continue
     const rng = mulberry32(seed + trial * 7919)
 
     // Deal a legal opening hand, reshuffling while it holds no Basic.
@@ -250,7 +293,11 @@ export function playtest(
       first.addLocked()
       second.addLocked()
       if (options.onProgress && (trial + 1) % (options.progressEvery ?? 5) === 0) {
-        options.onProgress(trial + 1, trials)
+        options.onProgress(trial + 1, trials, {
+        kind: 'board',
+        first: first.strictHits,
+        second: second.strictHits,
+      })
       }
       continue
     }
@@ -270,44 +317,42 @@ export function playtest(
     if (asFirst.hitBudget || asSecond.hitBudget) truncated++
 
     if (asFirst.score.strict) {
-      addRoute(firstRoutes, toExample(asFirst, true))
-      replayAsSecond ??= { deal, ctx }
+      addRoute(firstRoutes, toExample(asFirst, true, trial))
+      replayAsSecond ??= { deal, ctx, trial }
     } else if (asSecond.score.strict) {
-      addRoute(secondRoutes, toExample(asSecond, false))
+      addRoute(secondRoutes, toExample(asSecond, false, trial))
     } else if (asSecond.score.closeness > closestScore) {
       closestScore = asSecond.score.closeness
-      closest = toExample(asSecond, false)
+      closest = toExample(asSecond, false, trial)
     }
 
     if (options.onProgress && (trial + 1) % (options.progressEvery ?? 5) === 0) {
-      options.onProgress(trial + 1, trials)
+      options.onProgress(trial + 1, trials, {
+        kind: 'board',
+        first: first.strictHits,
+        second: second.strictHits,
+      })
+    }
+    // Close to done, the full result is shown and updated as games finish.
+    if (
+      options.onPartial &&
+      (options.partialAt
+        ? options.partialAt(trial + 1, trials)
+        : trial + 1 < trials &&
+          trial + 1 >= Math.ceil(trials * PARTIAL_FROM) &&
+          (trial + 1) % (options.progressEvery ?? 5) === 0)
+    ) {
+      options.onPartial(summarize(trial + 1))
     }
   }
 
   if (secondRoutes.size === 0 && replayAsSecond) {
-    const { deal, ctx } = replayAsSecond
+    const { deal, ctx, trial } = replayAsSecond
     const asSecond = playDeal(deal, goal, ctx, labelFor, options.maxNodes, false)
-    if (asSecond.score.strict) addRoute(secondRoutes, toExample(asSecond, false))
+    if (asSecond.score.strict) addRoute(secondRoutes, toExample(asSecond, false, trial))
   }
 
-  return {
-    ...averageOrders(first, second, trials),
-    trials,
-    goingFirst: first.result(trials),
-    goingSecond: second.result(trials),
-    prizeLocked: locked.stat(trials),
-    mulliganRate: deals === 0 ? 0 : mulligans / deals,
-    ignored,
-    truncated,
-    // Nothing succeeded anywhere? Then the closest attempt is the only thing
-    // worth showing.
-    examples:
-      firstRoutes.size + secondRoutes.size > 0
-        ? interleave([...firstRoutes.values()], [...secondRoutes.values()]).slice(0, MAX_EXAMPLES)
-        : closest
-          ? [closest]
-          : [],
-  }
+  return summarize(trials)
 }
 
 function addRoute(routes: Map<string, PlaytestExample>, example: PlaytestExample): void {
@@ -328,12 +373,16 @@ function interleave<T>(a: T[], b: T[]): T[] {
 export const toHand = (cards: DeckCard[]): ExampleCard[] =>
   cards.map((card) => ({ cardKey: card.key, label: card.label }))
 
-/** The table before anything is placed. */
-export const emptyBoard = (handCount: number): ExampleBoard => ({
+/** The table before anything is placed: the hand drawn, Prizes not yet set. */
+export const emptyBoard = (handCount: number, deckCount: number): ExampleBoard => ({
   active: null,
   bench: [],
   stadium: null,
+  stadiumKey: null,
   handCount,
+  deckCount,
+  prizeCount: 0,
+  discard: [],
 })
 
 /** Trim a finished state to the handful of fields the results panel renders. */
@@ -347,7 +396,11 @@ export function toExampleBoard(state: SimState): ExampleBoard {
     active: state.active ? slot(state.active) : null,
     bench: state.bench.map(slot),
     stadium: state.stadium ? cardName(state.stadium) : null,
+    stadiumKey: state.stadium?.key ?? null,
     handCount: state.hand.length,
+    deckCount: state.deck.length,
+    prizeCount: state.prizes.length,
+    discard: toHand(state.discard),
   }
 }
 
@@ -439,7 +492,11 @@ export function playDeal(
       // line - the placement is the decision most worth seeing, and the draw
       // is where the eighth card visibly comes from.
       frames = [
-        { step: 'Draw your opening hand', board: emptyBoard(7), hand: toHand(hand) },
+        {
+          step: 'Draw your opening hand',
+          board: emptyBoard(7, placed.deck.length + placed.prizes.length),
+          hand: toHand(hand),
+        },
         {
           step: `Start with ${hand[handIndex].label} in the Active Spot`,
           board: toExampleBoard(placed),
@@ -452,6 +509,7 @@ export function playDeal(
         },
         ...result.frames.map((state, i) => ({
           step: result.steps[i],
+          summary: result.summaries[i],
           board: toExampleBoard(state),
           hand: toHand(state.hand),
         })),
@@ -463,7 +521,7 @@ export function playDeal(
   return { score: best, frames, finalState, hitBudget }
 }
 
-function toExample(outcome: DealOutcome, goingFirst: boolean): PlaytestExample {
+function toExample(outcome: DealOutcome, goingFirst: boolean, trial: number): PlaytestExample {
   return {
     // The text list is derived from the frames, so the two can never drift.
     steps: outcome.frames.slice(1).map((frame) => frame.step),
@@ -471,6 +529,7 @@ function toExample(outcome: DealOutcome, goingFirst: boolean): PlaytestExample {
     board: outcome.finalState ? toExampleBoard(outcome.finalState) : null,
     reached: outcome.score.strict,
     goingFirst,
+    trial,
   }
 }
 

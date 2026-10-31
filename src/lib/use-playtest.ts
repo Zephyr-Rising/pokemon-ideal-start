@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { goalIsEmpty, type FieldGoal } from './board/goal'
+import type { ProgressPreview } from './sim/preview'
 import type { DeckCard } from './types'
 import type {
   PlaytestRequest,
@@ -19,25 +20,53 @@ export interface SimulationState<R> {
   startedAt: number | null
   running: boolean
   error: string | null
+  /** The run in flight's totals so far, for a preview of how it is shaping up. */
+  preview: ProgressPreview | null
 }
 
-const idle = { progress: 0, total: 0, startedAt: null, running: false, error: null }
+const idle = { progress: 0, total: 0, startedAt: null, running: false, error: null, preview: null }
 
-export type PlaytestState = SimulationState<ResultOf['board']>
-export type TurnsState = SimulationState<ResultOf['turns']>
+export type PlaytestState = SimulationControl<ResultOf['board']>
+export type TurnsState = SimulationControl<ResultOf['turns']>
 
-const DEBOUNCE_MS = 350
+/** A run's inputs, to tell whether the result on show still matches the board. */
+interface RunInputs {
+  cards: DeckCard[]
+  goal: FieldGoal
+  trials: number
+  seed: number
+}
+
+export interface SimulationControl<R> extends SimulationState<R> {
+  /**
+   * The deck, board or number of games has changed since the run on show (or
+   * in flight) started, so its figures describe a different board.
+   */
+  stale: boolean
+  /**
+   * Start a run on the board as it is now, stopping one still going. Pass
+   * `trials` to run a different number of games than the picker holds, for
+   * "play fewer games" while its new value has not landed yet; and
+   * `onlyTrials` to play just those deals — a shared game, replayed.
+   */
+  search: (options?: { trials?: number; onlyTrials?: number[] }) => void
+  /** The deals the run on show was limited to; null for a full run. */
+  only: number[] | null
+  /**
+   * Which run the result on show came from. Updates within a run keep it, so
+   * what a viewer picked in the results (an example game) survives them.
+   */
+  runId: number
+}
 
 /**
- * Runs a simulation in a worker, re-running when the deck or goal changes.
+ * Runs a simulation in a worker when asked to — the Search button — rather than
+ * on every edit: building a board takes several placements, and a run started
+ * after each one spent the machine on boards nobody wanted played out.
  *
- * Edits are debounced: dragging a card across several slots should not start a
- * run per frame. One worker is kept for the life of the component, and a run
- * already in flight is ignored once a newer one is requested, so results can
- * never arrive out of order.
- *
- * While `enabled` is false nothing runs, so a tab that is not showing costs
- * nothing. Coming back to it re-runs only if its inputs changed meanwhile.
+ * One worker is kept for the life of the component, and a run already in
+ * flight is ignored once a newer one is requested, so results can never
+ * arrive out of order.
  */
 export function useSimulation<M extends SimulationMode>(
   mode: M,
@@ -45,15 +74,13 @@ export function useSimulation<M extends SimulationMode>(
   goal: FieldGoal,
   trials: number,
   seed: number,
-  enabled = true,
-): SimulationState<ResultOf[M]> {
+): SimulationControl<ResultOf[M]> {
   const workerRef = useRef<Worker | null>(null)
   const requestId = useRef(0)
-  // The inputs of the last run started, to skip a re-run on returning to a tab.
-  const lastRun = useRef<{ cards: DeckCard[]; goal: FieldGoal; trials: number; seed: number } | null>(
-    null,
-  )
+  // The inputs of the last run started.
+  const [ran, setRan] = useState<RunInputs | null>(null)
   const [state, setState] = useState<SimulationState<ResultOf[M]>>({ result: null, ...idle })
+  const [runId, setRunId] = useState(0)
 
   // Whether the worker is partway through a run.
   const busy = useRef(false)
@@ -79,9 +106,19 @@ export function useSimulation<M extends SimulationMode>(
       if (message.id !== requestId.current) return
 
       if (message.kind === 'progress') {
-        setState((current) => ({ ...current, progress: message.done, total: message.total }))
+        setState((current) => ({
+          ...current,
+          progress: message.done,
+          total: message.total,
+          preview: message.preview ?? current.preview,
+        }))
+      } else if (message.kind === 'partial') {
+        setRunId(message.id)
+        // Shown as the result, still running: the panels mark it as updating.
+        setState((current) => ({ ...current, result: message.result as ResultOf[M] }))
       } else if (message.kind === 'done') {
         busy.current = false
+        setRunId(message.id)
         setState({ result: message.result as ResultOf[M], ...idle })
       } else {
         busy.current = false
@@ -96,52 +133,42 @@ export function useSimulation<M extends SimulationMode>(
     return () => {
       workerRef.current?.terminate()
       workerRef.current = null
-      // The worker is gone, so whatever it was running will never report back.
-      lastRun.current = null
     }
   }, [spawn])
 
-  useEffect(() => {
-    if (!enabled) return
-    if (cards.length === 0 || goalIsEmpty(goal)) {
-      lastRun.current = null
-      setState({ result: null, ...idle })
-      return
-    }
-    const last = lastRun.current
-    if (
-      last &&
-      last.cards === cards &&
-      last.goal === goal &&
-      last.trials === trials &&
-      last.seed === seed
-    ) {
-      return
-    }
-
-    const timer = setTimeout(() => {
+  const [only, setOnly] = useState<number[] | null>(null)
+  const search = useCallback(
+    (options?: { trials?: number; onlyTrials?: number[] }) => {
+      if (cards.length === 0 || goalIsEmpty(goal)) return
+      const runTrials = options?.trials ?? trials
+      const onlyTrials = options?.onlyTrials
+      setOnly(onlyTrials ?? null)
       // Stop a run still going rather than queue behind it.
       const worker = busy.current ? spawn() : workerRef.current
       if (!worker) return
       busy.current = true
       const id = ++requestId.current
-      lastRun.current = { cards, goal, trials, seed }
+      setRan({ cards, goal, trials: runTrials, seed })
       setState((current) => ({
         ...current,
         running: true,
         progress: 0,
-        total: trials,
+        total: runTrials,
         startedAt: performance.now(),
         error: null,
+        preview: null,
       }))
-      const request: PlaytestRequest = { id, mode, cards, goal, trials, seed }
+      const request: PlaytestRequest = { id, mode, cards, goal, trials: runTrials, seed, onlyTrials }
       worker.postMessage(request)
-    }, DEBOUNCE_MS)
+    },
+    [mode, cards, goal, trials, seed, spawn],
+  )
 
-    return () => clearTimeout(timer)
-  }, [mode, cards, goal, trials, seed, enabled, spawn])
+  const stale =
+    ran !== null &&
+    (ran.cards !== cards || ran.goal !== goal || ran.trials !== trials || ran.seed !== seed)
 
-  return state
+  return { ...state, stale, search, only, runId }
 }
 
 /** The turn-1 board playtest. */
@@ -150,8 +177,7 @@ export const usePlaytest = (
   goal: FieldGoal,
   trials: number,
   seed: number,
-  enabled = true,
-): PlaytestState => useSimulation('board', cards, goal, trials, seed, enabled)
+): PlaytestState => useSimulation('board', cards, goal, trials, seed)
 
 /** How many turns the board takes. */
 export const useTurns = (
@@ -159,5 +185,4 @@ export const useTurns = (
   goal: FieldGoal,
   trials: number,
   seed: number,
-  enabled = true,
-): TurnsState => useSimulation('turns', cards, goal, trials, seed, enabled)
+): TurnsState => useSimulation('turns', cards, goal, trials, seed)
